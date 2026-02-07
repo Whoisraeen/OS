@@ -1,0 +1,70 @@
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c kernel.c -o kernel.o
+kernel.c:61:40: warning: ISO C does not allow extra ';' outside of a function [-Wpedantic]
+   61 | static volatile LIMINE_BASE_REVISION(3);
+      |                                        ^
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c gdt.c -o gdt.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c idt.c -o idt.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c pic.c -o pic.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c keyboard.c -o keyboard.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c pmm.c -o pmm.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c vmm.c -o vmm.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c heap.c -o heap.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c serial.c -o serial.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c console.c -o console.o
+console.c: In function 'console_scroll':
+console.c:48:12: warning: unused variable 'line_size' [-Wunused-variable]
+   48 |     size_t line_size = fb_width * FONT_HEIGHT;
+      |            ^~~~~~~~~
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c vfs.c -o vfs.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c initrd.c -o initrd.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c syscall.c -o syscall.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c user.c -o user.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c shell.c -o shell.o
+shell.c:35:15: warning: 'slen' defined but not used [-Wunused-function]
+   35 | static size_t slen(const char *s) {
+      |               ^~~~
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c timer.c -o timer.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c sched_new.c -o sched_new.o
+sched_new.c: In function 'task_create':
+sched_new.c:112:6: warning: operation on 'sp' may be undefined [-Wsequence-point]
+  112 |     *--sp = (uint64_t)sp + 8;  // RSP (will be fixed)
+      |      ^~~~
+sched_new.c: In function 'scheduler_debug_print_tasks':
+sched_new.c:268:31: warning: comparison of integer expressions of different signedness: 'int' and 'uint32_t' {aka 'unsigned int'} [-Wsign-compare]
+  268 |             char current = (i == current_task_idx) ? '*' : ' ';
+      |                               ^~
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c mouse.c -o mouse.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c desktop.c -o desktop.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c speaker.c -o speaker.o
+speaker.c:6:9: warning: 'PIT_FREQUENCY' redefined
+    6 | #define PIT_FREQUENCY 1193180
+      |         ^~~~~~~~~~~~~
+In file included from speaker.c:3:
+timer.h:7:9: note: this is the location of the previous definition
+    7 | #define PIT_FREQUENCY 1193182
+      |         ^~~~~~~~~~~~~
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c compositor.c -o compositor.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c elf.c -o elf.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c ipc.c -o ipc.o
+ipc.c: In function 'ipc_send_message':
+ipc.c:199:52: warning: unused parameter 'flags' [-Wunused-parameter]
+  199 |                      uint32_t sender_pid, uint32_t flags, uint32_t timeout_ms) {
+      |                                           ~~~~~~~~~^~~~~
+ipc.c:199:68: warning: unused parameter 'timeout_ms' [-Wunused-parameter]
+  199 |                      uint32_t sender_pid, uint32_t flags, uint32_t timeout_ms) {
+      |                                                           ~~~~~~~~~^~~~~~~~~~
+ipc.c: In function 'ipc_recv_message':
+ipc.c:241:70: warning: unused parameter 'timeout_ms' [-Wunused-parameter]
+  241 |                      uint32_t receiver_pid, uint32_t flags, uint32_t timeout_ms) {
+      |                                                             ~~~~~~~~~^~~~~~~~~~
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -c security.c -o security.o
+security.c: In function 'security_check_ipc_access':
+security.c:250:55: warning: unused parameter 'dest_port' [-Wunused-parameter]
+  250 | bool security_check_ipc_access(uint32_t pid, uint32_t dest_port) {
+      |                                              ~~~~~~~~~^~~~~~~~~
+nasm -felf64 interrupts.S -o interrupts.o
+interrupts.S:140: warning: label alone on a line without a colon might be in error [-w+label-orphan]
+ld -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -T linker.ld kernel.o gdt.o idt.o pic.o keyboard.o pmm.o vmm.o heap.o serial.o console.o vfs.o initrd.o syscall.o user.o shell.o timer.o sched_new.o mouse.o desktop.o speaker.o compositor.o elf.o ipc.o security.o interrupts.o -o kernel.elf
+ld: unrecognised emulation mode: elf_x86_64
+Supported emulations: i386pep i386pe
+mingw32-make: *** [makefile:36: kernel.elf] Error 1
