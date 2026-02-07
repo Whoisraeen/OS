@@ -2,149 +2,161 @@
 #include "pmm.h"
 #include "serial.h"
 #include "console.h"
+#include "idt.h"
 
-// Task array
 static task_t tasks[MAX_TASKS];
-static uint32_t current_task = 0;
+static uint32_t current_task_id = 0;
 static uint32_t num_tasks = 0;
-static int scheduler_enabled = 0;
+static bool scheduler_ready = false;
 
-// Stack size per task (4 pages = 16KB)
-#define TASK_STACK_SIZE (4 * 4096)
-
-// External: get HHDM offset for stack allocation
-extern uint64_t pmm_get_hhdm_offset(void);
+// Global used by assembly to check if we need to switch
+uint64_t next_rsp = 0;
 
 void scheduler_init(void) {
-    // Clear all tasks
     for (int i = 0; i < MAX_TASKS; i++) {
         tasks[i].state = TASK_UNUSED;
-        tasks[i].id = i;
     }
     
-    // Task 0 is the kernel/init task (already running)
+    // Create Kernel Task (Task 0)
+    // It is already running, so we don't need a stack allocated for it yet,
+    // (Wait, we DO need a place to save its state when we switch AWAY from it)
+    // But initially, its state is "running on current stack".
+    
     tasks[0].id = 0;
     tasks[0].state = TASK_RUNNING;
-    tasks[0].stack = NULL;  // Uses existing kernel stack
-    tasks[0].rsp = 0;
+    // Name
+    const char *n = "kernel_main";
+    for(int i=0; n[i]; i++) tasks[0].name[i] = n[i];
+    tasks[0].name[11] = 0;
     
-    // Copy name
-    const char *n = "kernel";
-    for (int i = 0; n[i] && i < 31; i++) tasks[0].name[i] = n[i];
-    tasks[0].name[31] = '\0';
+    tasks[0].cr3 = 0; // Use current CR3 (kernel)
     
+    current_task_id = 0;
     num_tasks = 1;
-    current_task = 0;
-    scheduler_enabled = 1;
+    scheduler_ready = true;
     
-    kprintf("[SCHED] Scheduler initialized\n");
+    kprintf("[SCHED] Scheduler Initialized. Main task ID: 0\n");
 }
 
 int task_create(const char *name, void (*entry)(void)) {
     // Find free slot
     int slot = -1;
-    for (int i = 0; i < MAX_TASKS; i++) {
-        if (tasks[i].state == TASK_UNUSED) {
+    for (int i = 1; i < MAX_TASKS; i++) { // Start at 1
+        if (tasks[i].state == TASK_UNUSED || tasks[i].state == TASK_TERMINATED) {
             slot = i;
             break;
         }
     }
     
-    if (slot < 0) {
-        kprintf("[SCHED] No free task slots!\n");
+    if (slot == -1) {
+        kprintf("[SCHED] No free task slots\n");
         return -1;
     }
     
-    // Allocate stack (4 pages)
-    uint64_t stack_phys = (uint64_t)pmm_alloc_page();
-    if (stack_phys == 0) {
-        kprintf("[SCHED] Failed to allocate task stack!\n");
+    // Allocate stack
+    void *stack = pmm_alloc_pages((TASK_STACK_SIZE + 4095) / 4096);
+    if (!stack) {
+        kprintf("[SCHED] OOM allocating stack\n");
         return -1;
     }
     
+    // We need virtual address for stack.
+    // Assuming identity map coverage is sufficient or using the returned HHDM address
     uint64_t hhdm = pmm_get_hhdm_offset();
-    uint64_t *stack = (uint64_t *)(stack_phys + hhdm);
+    uint64_t stack_virt = (uint64_t)stack + hhdm;
     
-    // Set up initial stack for context switch
-    // Stack grows down, so start at top
-    uint64_t *sp = (uint64_t *)((uint64_t)stack + 4096 - 8);
+    tasks[slot].stack_base = (void*)stack_virt;
     
-    // Push initial context (iretq frame + registers)
-    // This mirrors what the ISR stub expects
-    *--sp = 0x10;           // SS (kernel data)
-    *--sp = (uint64_t)sp;   // RSP (will be updated)
-    *--sp = 0x202;          // RFLAGS (IF=1)
-    *--sp = 0x08;           // CS (kernel code)
-    *--sp = (uint64_t)entry; // RIP (entry point)
+    // Setup stack frame for "iretq" behavior when switching TO this task
+    uint64_t *sp = (uint64_t *)(stack_virt + TASK_STACK_SIZE);
     
-    // Push dummy registers (r15-rax = 15 registers)
-    for (int i = 0; i < 15; i++) {
-        *--sp = 0;
-    }
+    // Registers_t layout (matches interrupts.S pop order)
+    // ss, rsp, rflags, cs, rip, err, int, rax, rbx, rcx, rdx, rsi, rdi, rbp, r8-r15
     
-    // Set up task
-    tasks[slot].id = slot;
-    tasks[slot].state = TASK_READY;
-    tasks[slot].stack = stack;
+    *--sp = 0x10;          // SS (Kernel Data)
+    *--sp = (uint64_t)sp;  // RSP (this stack) - Wait, this value will be ignored by iretq in Ring 0? 
+                           // No, iretq restores mechanism. But if staying in Ring 0, effectively yes.
+                           // Actually we want RSP to be the value BEFORE interrupt.
+                           // Since we are creating a new kernel thread, it starts "as if" interrupted.
+    *--sp = 0x202;         // RFLAGS (IF=1)
+    *--sp = 0x08;          // CS (Kernel Code)
+    *--sp = (uint64_t)entry; // RIP
+    
+    *--sp = 0; // err_code
+    *--sp = 0; // int_no
+    
+    // GPRs
+    for(int i=0; i<15; i++) *--sp = 0;
+    
     tasks[slot].rsp = (uint64_t)sp;
-    
+    tasks[slot].state = TASK_READY;
+    tasks[slot].id = slot;
     // Copy name
-    for (int i = 0; name[i] && i < 31; i++) tasks[slot].name[i] = name[i];
-    tasks[slot].name[31] = '\0';
+    for(int i=0; name[i] && i<31; i++) tasks[slot].name[i] = name[i];
+    tasks[slot].name[31] = 0;
     
     num_tasks++;
-    
-    kprintf("[SCHED] Created task %d: %s\n", slot, name);
+    kprintf("[SCHED] Created Task %d (%s)\n", slot, name);
     return slot;
 }
 
-// Simple round-robin scheduler
-void scheduler_tick(void) {
-    if (!scheduler_enabled || num_tasks <= 1) {
-        return;
-    }
+uint32_t task_current_id(void) {
+    return current_task_id;
+}
+
+// Function called by assembly to Switch Tasks
+// Returns new RSP to load
+uint64_t scheduler_switch(registers_t *regs) {
+    if (!scheduler_ready) return (uint64_t)regs;
     
-    // Find next ready task
-    uint32_t next = current_task;
-    for (int i = 0; i < MAX_TASKS; i++) {
-        next = (next + 1) % MAX_TASKS;
-        if (tasks[next].state == TASK_READY || tasks[next].state == TASK_RUNNING) {
+    // 1. Update current task's state
+    tasks[current_task_id].rsp = (uint64_t)regs;
+    
+    // 2. Select next task (Round Robin)
+    int next = -1;
+    for (int i = 1; i <= MAX_TASKS; i++) { // Search all other tasks
+        int idx = (current_task_id + i) % MAX_TASKS;
+        if (tasks[idx].state == TASK_READY || tasks[idx].state == TASK_RUNNING) {
+            next = idx;
             break;
         }
     }
     
-    if (next == current_task) {
-        return;  // No other task to run
+    // If no other task is ready, return current RSP
+    if (next == -1 || next == (int)current_task_id) {
+        return (uint64_t)regs; 
     }
     
-    // Context switch
-    tasks[current_task].state = TASK_READY;
-    uint32_t old = current_task;
-    current_task = next;
-    tasks[current_task].state = TASK_RUNNING;
+    // 3. Switch Task
+    tasks[current_task_id].state = TASK_READY;
+    current_task_id = next;
+    tasks[current_task_id].state = TASK_RUNNING;
     
-    // The actual context switch happens in the ISR return
-    // We save/restore RSP in the task structure
-    // For now, this is a simplified implementation
-    (void)old;
-}
-
-void task_yield(void) {
-    __asm__ volatile ("int $0x20");  // Trigger timer interrupt
-}
-
-uint32_t task_current_id(void) {
-    return current_task;
+    // 4. Update TSS RSP0 (for Ring 3 -> Ring 0 transitions)
+    if (tasks[current_task_id].stack_base) {
+        uint64_t kstack_top = (uint64_t)tasks[current_task_id].stack_base + TASK_STACK_SIZE;
+        // Direct update of TSS RSP0 via pointer
+        extern uint64_t *kernel_tss_rsp0_ptr; 
+        if (kernel_tss_rsp0_ptr) {
+             *kernel_tss_rsp0_ptr = kstack_top;
+        }
+    }
+    
+    // 5. Return new RSP
+    // kprintf("[SCHED] Switch to %d\n", current_task_id);
+    return tasks[current_task_id].rsp;
 }
 
 void task_exit(void) {
-    tasks[current_task].state = TASK_TERMINATED;
-    num_tasks--;
-    kprintf("[SCHED] Task %d terminated\n", current_task);
+    kprintf("[SCHED] Task %d exiting\n", current_task_id);
+    tasks[current_task_id].state = TASK_TERMINATED;
     
-    // Yield to let scheduler pick next task
-    task_yield();
-    
-    // Should never return
-    for (;;) __asm__ ("hlt");
+    // Force yield
+    __asm__ volatile("int $32");
+    // Should not return
+    for(;;) __asm__("hlt");
+}
+
+void task_yield(void) {
+    __asm__ volatile("int $32");
 }
