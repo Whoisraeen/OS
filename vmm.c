@@ -167,8 +167,19 @@ void vmm_switch(void) {
     );
 }
 
-// Map a page with USER permissions (for Ring 3 access)
+// Map a page with USER permissions (for Ring 3 access) using CURRENT CR3
+// This is needed because sys_get_framebuffer runs in the context of the user process
+// which has its own PML4, not the master kernel PML4.
 void vmm_map_user_page(uint64_t virt, uint64_t phys) {
+    // Get current PML4 (CR3)
+    uint64_t current_pml4_phys;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(current_pml4_phys));
+    
+    // Mask out flags (CR3 has flags in lower bits)
+    current_pml4_phys &= PTE_ADDR_MASK;
+    
+    uint64_t *pml4 = (uint64_t *)phys_to_virt(current_pml4_phys);
+    
     // Get indices
     size_t pml4_idx = PML4_INDEX(virt);
     size_t pdpt_idx = PDPT_INDEX(virt);
@@ -179,16 +190,16 @@ void vmm_map_user_page(uint64_t virt, uint64_t phys) {
     uint64_t intermediate_flags = PTE_PRESENT | PTE_WRITABLE | PTE_USER;
     
     // Walk the page tables, creating as needed (with USER flag)
-    if (!(pml4_virt[pml4_idx] & PTE_PRESENT)) {
+    if (!(pml4[pml4_idx] & PTE_PRESENT)) {
         uint64_t new_phys = (uint64_t)pmm_alloc_page();
         uint64_t *new_virt = (uint64_t *)phys_to_virt(new_phys);
         for (int i = 0; i < 512; i++) new_virt[i] = 0;
-        pml4_virt[pml4_idx] = new_phys | intermediate_flags;
+        pml4[pml4_idx] = new_phys | intermediate_flags;
     } else {
-        pml4_virt[pml4_idx] |= PTE_USER; // Ensure USER bit is set
+        pml4[pml4_idx] |= PTE_USER; // Ensure USER bit is set
     }
     
-    uint64_t *pdpt = (uint64_t *)phys_to_virt(pml4_virt[pml4_idx] & PTE_ADDR_MASK);
+    uint64_t *pdpt = (uint64_t *)phys_to_virt(pml4[pml4_idx] & PTE_ADDR_MASK);
     if (!(pdpt[pdpt_idx] & PTE_PRESENT)) {
         uint64_t new_phys = (uint64_t)pmm_alloc_page();
         uint64_t *new_virt = (uint64_t *)phys_to_virt(new_phys);

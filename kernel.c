@@ -273,6 +273,28 @@ void _start(void) {
         } else {
             console_printf("[KERNEL] init.elf not found in initrd!\n");
         }
+        
+        // Launch Compositor
+        vfs_node_t *comp_node = initrd_find("compositor.elf");
+        if (comp_node) {
+            console_printf("[KERNEL] Found compositor.elf, loading...\n");
+            void *comp_data = kmalloc(comp_node->length);
+            if (comp_data) {
+                vfs_read(comp_node, 0, comp_node->length, (uint8_t*)comp_data);
+                
+                extern int task_create_user(const char *name, const void *elf_data, size_t size);
+                int pid = task_create_user("compositor", comp_data, comp_node->length);
+                if (pid >= 0) {
+                    console_printf("[KERNEL] Compositor process started (PID %d)\n", pid);
+                } else {
+                    console_printf("[KERNEL] Failed to start compositor process\n");
+                }
+                kfree(comp_data);
+            }
+        } else {
+            console_printf("[KERNEL] compositor.elf not found in initrd!\n");
+        }
+
     } else {
         console_printf(" Initrd: Not loaded (no module)\n");
     }
@@ -280,14 +302,6 @@ void _start(void) {
     // Initialize mouse
     extern void mouse_init(void);
     mouse_init();
-    
-    // Initialize compositor (next-gen window manager)
-    extern void compositor_init(uint32_t *framebuffer, int width, int height);
-    extern void compositor_render(void);
-    extern void *compositor_create_window(const char *title, int x, int y, int w, int h);
-    extern void comp_draw_text(void *win, int x, int y, const char *text, uint32_t color);
-    
-    compositor_init(fb_ptr, fb_width, fb_height);
     
     // Initialize Security and IPC
     extern void security_init(void);
@@ -299,34 +313,8 @@ void _start(void) {
     extern void syscall_init(void);
     syscall_init();
 
-    // Create demo windows with new compositor
-    void *win1 = compositor_create_window("Welcome to RaeenOS!", 100, 80, 420, 220);
-    if (win1) {
-        comp_draw_text(win1, 10, 10, "RaeenOS - A hobby operating system", 0xFFFFFFFF);
-        comp_draw_text(win1, 10, 35, "Features:", 0xFFCCCCCC);
-        comp_draw_text(win1, 10, 55, "* Alpha blending & transparency", 0xFF88CCFF);
-        comp_draw_text(win1, 10, 75, "* Drop shadows & rounded corners", 0xFF88CCFF);
-        comp_draw_text(win1, 10, 95, "* Compositing window manager", 0xFF88CCFF);
-        comp_draw_text(win1, 10, 115, "* Centered macOS-style dock", 0xFF88CCFF);
-        comp_draw_text(win1, 10, 140, "Drag windows by title bar!", 0xFFFFCC00);
-    }
-    
-    void *win2 = compositor_create_window("System Info", 580, 120, 320, 180);
-    if (win2) {
-        comp_draw_text(win2, 10, 10, "Architecture: x86_64", 0xFFFFFFFF);
-        comp_draw_text(win2, 10, 30, "Timer: 100 Hz PIT", 0xFFCCCCCC);
-        comp_draw_text(win2, 10, 50, "Mouse: PS/2 with IRQ12", 0xFFCCCCCC);
-        comp_draw_text(win2, 10, 70, "Heap: 4MB kernel heap", 0xFFCCCCCC);
-        comp_draw_text(win2, 10, 100, "Next-Gen Compositor", 0xFF00FF88);
-    }
-    
-    console_printf("\n Compositor started!\n");
-    console_printf(" Drag windows, click X to close!\n");
-    
-    // Main compositor loop
+    // Main Loop (Kernel Idle)
     for (;;) {
-        compositor_render();
-        // Small delay
-        for (volatile int i = 0; i < 50000; i++);
+        __asm__ volatile("hlt");
     }
 }

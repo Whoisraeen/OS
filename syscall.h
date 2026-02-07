@@ -18,6 +18,8 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
 #define SYS_IPC_SEND     11
 #define SYS_IPC_RECV     12
 #define SYS_IPC_LOOKUP   13
+#define SYS_GET_FRAMEBUFFER 15
+#define SYS_GET_INPUT_EVENT 16
 #define SYS_SEC_GETCAPS  20
 
 #endif

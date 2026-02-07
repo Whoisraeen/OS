@@ -5,6 +5,10 @@
 #include "shell.h"
 #include "console.h"
 
+// Forward declarations
+// void pic_eoi(uint8_t irq); // Wrong name
+// void shell_handle_key(char c); // Wrong name
+
 // Shift state
 static int shift_pressed = 0;
 
@@ -84,6 +88,21 @@ static unsigned char kbdus_upper[128] = {
     0,
 };
 
+// Simple keyboard buffer
+#define KBD_BUF_SIZE 32
+static uint32_t kbd_buf[KBD_BUF_SIZE];
+static int kbd_head = 0;
+static int kbd_tail = 0;
+
+int get_keyboard_event(uint32_t *type, uint32_t *code) {
+    if (kbd_head == kbd_tail) return 0;
+    
+    *type = 1; // Keyboard
+    *code = kbd_buf[kbd_tail];
+    kbd_tail = (kbd_tail + 1) % KBD_BUF_SIZE;
+    return 1;
+}
+
 void keyboard_handler(struct interrupt_frame *frame) {
     (void)frame;
     
@@ -99,19 +118,26 @@ void keyboard_handler(struct interrupt_frame *frame) {
         shift_pressed = 0;
         return;
     }
-    
-    // If the top bit is set, it's a "key release" event
+
     if (scancode & 0x80) {
-        return;
+        // Key release
+    } else {
+        // Key press
+        char c = shift_pressed ? kbdus_upper[scancode] : kbdus_lower[scancode];
+        if (c) {
+            console_putc(c); // Echo to debug console
+            shell_input(c); // Send to shell
+            
+            // Push to buffer
+            int next = (kbd_head + 1) % KBD_BUF_SIZE;
+            if (next != kbd_tail) {
+                kbd_buf[kbd_head] = c;
+                kbd_head = next;
+            }
+        }
     }
     
-    // Key press - get character
-    char c = shift_pressed ? kbdus_upper[scancode] : kbdus_lower[scancode];
-    
-    if (c != 0) {
-        // Send to shell
-        shell_input(c);
-    }
+    pic_send_eoi(1);
 }
 
 void keyboard_init(void) {

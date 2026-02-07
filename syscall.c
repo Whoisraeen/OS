@@ -6,6 +6,7 @@
 #include "ipc.h"
 #include "security.h"
 #include "sched.h"
+#include "vmm.h"
 
 // MSR registers
 #define MSR_EFER     0xC0000080
@@ -98,6 +99,90 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
         case SYS_IPC_LOOKUP: {
             // arg1 = name ptr
             return (uint64_t)ipc_port_lookup((const char *)arg1);
+        }
+        
+        // === Graphics/Input Syscalls ===
+        case SYS_GET_FRAMEBUFFER: {
+            // arg1 = struct fb_info *info
+            if (!arg1) return -1;
+            
+            extern uint32_t *fb_ptr;
+            extern uint64_t fb_width;
+            extern uint64_t fb_height;
+            
+            // Map framebuffer to user space
+            // For simplicity, we map it at 0x800000000 (32GB mark)
+            // Ideally we should find a free region.
+            // CAUTION: 0x800000000 might be in kernel space depending on layout?
+            // User space is typically lower half (0 to 0x00007FFFFFFFFFFF).
+            // 0x800000000 is 34GB, which is well within User space.
+            uint64_t fb_user_base = 0x800000000;
+            uint64_t fb_size = fb_width * fb_height * 4;
+            // Align size to page
+            fb_size = (fb_size + 4095) & ~4095;
+            
+            uint64_t phys_base = ((uint64_t)fb_ptr) - vmm_get_hhdm_offset();
+            
+            for (uint64_t off = 0; off < fb_size; off += 4096) {
+                vmm_map_user_page(fb_user_base + off, phys_base + off);
+            }
+            
+            // Fill info struct
+            typedef struct {
+                uint64_t addr;
+                uint64_t width;
+                uint64_t height;
+                uint64_t pitch;
+                uint32_t bpp;
+            } fb_info_t;
+            
+            fb_info_t *info = (fb_info_t *)arg1;
+            info->addr = fb_user_base;
+            info->width = fb_width;
+            info->height = fb_height;
+            info->pitch = fb_width * 4;
+            info->bpp = 32;
+            
+            return 0;
+        }
+        
+        case SYS_GET_INPUT_EVENT: {
+            // arg1 = struct input_event *event
+            // Simple non-blocking event queue
+            typedef struct {
+                uint32_t type; // 1=key, 2=mouse
+                uint32_t code; // key: scancode/char, mouse: buttons
+                int32_t x;     // mouse x
+                int32_t y;     // mouse y
+            } input_event_t;
+            
+            if (!arg1) return -1;
+            
+            extern int get_keyboard_event(uint32_t *type, uint32_t *code);
+            extern int get_mouse_event(uint32_t *type, uint32_t *buttons, int32_t *x, int32_t *y);
+            
+            input_event_t *evt = (input_event_t *)arg1;
+            
+            // Prioritize keyboard
+            uint32_t type, code;
+            if (get_keyboard_event(&type, &code)) {
+                evt->type = type;
+                evt->code = code;
+                return 1;
+            }
+            
+            // Check mouse
+            uint32_t buttons;
+            int32_t mx, my;
+            if (get_mouse_event(&type, &buttons, &mx, &my)) {
+                evt->type = type;
+                evt->code = buttons;
+                evt->x = mx;
+                evt->y = my;
+                return 1;
+            }
+            
+            return 0; // No event
         }
         
         // === Security Syscalls ===

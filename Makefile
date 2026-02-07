@@ -45,7 +45,11 @@ initrd/init.elf: userspace/init.c userspace/linker.ld
 	mkdir -p initrd
 	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/init.c -o initrd/init.elf
 
-initrd.tar: initrd/init.elf
+initrd/compositor.elf: userspace/compositor.c userspace/linker.ld
+	mkdir -p initrd
+	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/compositor.c -o initrd/compositor.elf
+
+initrd.tar: initrd/init.elf initrd/compositor.elf
 	tar -cvf initrd.tar -C initrd .
 
 $(ISO_IMAGE): $(KERNEL_BIN) limine initrd.tar
