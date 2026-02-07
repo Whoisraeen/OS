@@ -52,6 +52,7 @@ static void smp_ap_entry(struct limine_smp_info *info) {
     
     // Write MSR_GS_BASE (0xC0000101) using helper
     wrmsr(0xC0000101, gs_base);
+    wrmsr(0xC0000102, 0); // KERNEL_GS_BASE = 0
     
     // 5. Initialize LAPIC (and Timer)
     lapic_init();
@@ -110,6 +111,7 @@ void smp_init(void) {
             // Setup GS for BSP immediately
             uint64_t gs_base = (uint64_t)&cpus[i];
             wrmsr(0xC0000101, gs_base);
+            wrmsr(0xC0000102, 0); // KERNEL_GS_BASE = 0 (User Base)
             
             // Initialize LAPIC on BSP too
             lapic_init();
@@ -127,4 +129,9 @@ void smp_init(void) {
 
 int smp_get_cpu_count(void) {
     return cpu_count;
+}
+
+cpu_t *smp_get_cpu_by_id(uint32_t id) {
+    if (id >= (uint32_t)cpu_count) return NULL;
+    return &cpus[id];
 }

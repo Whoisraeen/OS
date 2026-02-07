@@ -215,3 +215,19 @@ void vmm_map_user_page(uint64_t virt, uint64_t phys) {
 uint64_t vmm_get_pml4(void) {
     return pml4_phys;
 }
+
+uint64_t vmm_create_user_pml4(void) {
+    uint64_t phys = (uint64_t)pmm_alloc_page();
+    if (!phys) return 0;
+    
+    uint64_t *virt = (uint64_t *)phys_to_virt(phys);
+    
+    // Zero lower half (User space)
+    for (int i = 0; i < 256; i++) virt[i] = 0;
+    
+    // Copy upper half (Kernel space) from kernel PML4
+    // We assume pml4_virt is the master kernel PML4
+    for (int i = 256; i < 512; i++) virt[i] = pml4_virt[i];
+    
+    return phys;
+}

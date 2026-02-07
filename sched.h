@@ -24,7 +24,7 @@ typedef enum {
     TASK_TERMINATED
 } task_state_t;
 
-typedef struct {
+typedef struct task_t {
     uint32_t id;
     char name[32];
     task_state_t state;
@@ -46,6 +46,7 @@ typedef struct {
 // API
 void scheduler_init(void);
 int task_create(const char *name, void (*entry)(void));
+int task_create_user(const char *name, const void *elf_data, size_t size);
 void task_exit(void);
 void task_yield(void);
 uint32_t task_current_id(void);

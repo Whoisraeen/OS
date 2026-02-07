@@ -5,6 +5,7 @@
 #include "gdt.h" // For GDT_KERNEL_CODE
 #include "ipc.h"
 #include "security.h"
+#include "sched.h"
 
 // MSR registers
 #define MSR_EFER     0xC0000080
@@ -75,6 +76,7 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             return -1;
 
         case SYS_YIELD:
+            task_yield();
             return 0;
 
         // === IPC Syscalls ===

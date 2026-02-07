@@ -17,6 +17,8 @@
 #include "user.h"
 #include "ipc.h"
 #include "security.h"
+#include "cpu.h"
+#include "heap.h"
 
 // Globals for drivers to access
 uint32_t *fb_ptr = NULL;
@@ -26,7 +28,6 @@ uint64_t fb_height = 0;
 // =====================================================================
 // Test tasks for verifying preemptive multitasking
 // =====================================================================
-// Safe test tasks (no division, no kprintf)
 void test_task1(void) {
     int x = 0;
     int y = 500;
@@ -40,6 +41,11 @@ void test_task1(void) {
         
         // Busy wait
         for (volatile int i = 0; i < 1000000; i++);
+        
+        if (x == 0) {
+            cpu_t *cpu = get_cpu();
+            if (cpu) kprintf("[TASK1] Running on CPU %d\n", cpu->cpu_id);
+        }
     }
 }
 
@@ -56,6 +62,11 @@ void test_task2(void) {
         
         // Busy wait
         for (volatile int i = 0; i < 1000000; i++);
+        
+        if (x == 0) {
+            cpu_t *cpu = get_cpu();
+            if (cpu) kprintf("[TASK2] Running on CPU %d\n", cpu->cpu_id);
+        }
     }
 }
 
@@ -64,7 +75,8 @@ void test_task3(void) {
     for (;;) {
         sum += 1;
         if (sum % 1000000 == 0) {
-            kprintf("[TASK3] Sum reached %d million\n", sum / 1000000);
+            cpu_t *cpu = get_cpu();
+            kprintf("[TASK3] Sum reached %d million on CPU %d\n", sum / 1000000, cpu ? cpu->cpu_id : 99);
         }
     }
 }
@@ -239,6 +251,27 @@ void _start(void) {
             size_t read = vfs_read(hello, 0, 255, buffer);
             buffer[read] = '\0';
             console_printf("%s\n", (char *)buffer);
+        }
+        
+        // Launch init process
+        vfs_node_t *init_node = initrd_find("init.elf");
+        if (init_node) {
+            console_printf("[KERNEL] Found init.elf, loading...\n");
+            void *init_data = kmalloc(init_node->length);
+            if (init_data) {
+                vfs_read(init_node, 0, init_node->length, (uint8_t*)init_data);
+                
+                extern int task_create_user(const char *name, const void *elf_data, size_t size);
+                int pid = task_create_user("init", init_data, init_node->length);
+                if (pid >= 0) {
+                    console_printf("[KERNEL] Init process started (PID %d)\n", pid);
+                } else {
+                    console_printf("[KERNEL] Failed to start init process\n");
+                }
+                kfree(init_data);
+            }
+        } else {
+            console_printf("[KERNEL] init.elf not found in initrd!\n");
         }
     } else {
         console_printf(" Initrd: Not loaded (no module)\n");

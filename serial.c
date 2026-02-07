@@ -12,6 +12,8 @@ static int serial_is_transmit_empty(void) {
 }
 
 void serial_init(void) {
+    spinlock_init(&serial_lock);
+
     // Disable interrupts
     outb(COM1_PORT + 1, 0x00);
     
@@ -90,6 +92,8 @@ static void print_num(uint64_t num, int base, int width, char pad) {
 }
 
 void kprintf(const char *fmt, ...) {
+    spinlock_acquire(&serial_lock);
+    
     va_list args;
     va_start(args, fmt);
     

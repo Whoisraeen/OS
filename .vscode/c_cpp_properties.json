@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "name": "Kernel-GCC",
+            "includePath": [
+                "${workspaceFolder}/**"
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE",
+                "_UNICODE",
+                "__x86_64__",
+                "__GNUC__"
+            ],
+            "compilerPath": "gcc",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}

@@ -77,6 +77,9 @@ int elf_validate(const void *data, size_t size);
 // Load ELF into memory, returns entry point (0 on failure)
 elf_load_result_t elf_load(const void *data, size_t size);
 
+// Load ELF into USER memory (expects CR3 to be set to user PML4), returns entry point
+uint64_t elf_load_user(const void *data, size_t size);
+
 // Execute loaded ELF (jumps to entry point)
 void elf_execute(uint64_t entry_point);
 

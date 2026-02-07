@@ -39,4 +39,7 @@ uint64_t vmm_get_hhdm_offset(void);
 // Get PML4 physical address
 uint64_t vmm_get_pml4(void);
 
+// Create a new PML4 for a user process (maps kernel space)
+uint64_t vmm_create_user_pml4(void);
+
 #endif

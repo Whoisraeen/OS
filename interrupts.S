@@ -34,9 +34,7 @@ tss_flush:
 ; Jump to Ring 3 usermode
 ; rdi = user entry point
 ; rsi = user stack pointer
-; Entry: 0x23 (User Code), 0x1B (User Data) - Wait, we swapped them!
-; GDT[3] = 0x1B (User Data)
-; GDT[4] = 0x23 (User Code)
+; Entry: 0x23 (User Code), 0x1B (User Data)
 jump_to_usermode:
     ; Data segments for user (RPL 3)
     mov ax, 0x1B        ; User Data (Index 3, RPL 3)
@@ -46,12 +44,6 @@ jump_to_usermode:
     mov gs, ax
     
     ; Stack frame for IRETQ
-    ; [RSP+32] SS     (User Data)
-    ; [RSP+24] RSP    (User Stack)
-    ; [RSP+16] RFLAGS (Interrupts enabled)
-    ; [RSP+8]  CS     (User Code)
-    ; [RSP+0]  RIP    (User Entry)
-    
     push 0x1B           ; SS = User Data
     push rsi            ; RSP = User Stack
     pushfq
@@ -61,60 +53,38 @@ jump_to_usermode:
     push 0x23           ; CS = User Code (Index 4, RPL 3)
     push rdi            ; RIP = User Entry
     
+    swapgs              ; Swap GS to User GS
     iretq
 
 ; -----------------------------------------------------------------------------
 ; Syscall Entry Point (LSTAR points here)
 ; -----------------------------------------------------------------------------
-; RCX = User RIP
-; R11 = User RFLAGS
-; RDI, RSI, RDX, R10, R8, R9 = Arguments
-; -----------------------------------------------------------------------------
-section .data
-    ; Temporary storage for user stack pointer (until we have per-cpu GS)
-    global syscall_scratch_rsp
-    syscall_scratch_rsp: dq 0
-
 section .text
 
 syscall_entry:
-    ; 1. Swap to kernel GS (if we had it, skipping for global var approach)
-    ; swapgs 
+    swapgs              ; Swap GS to Kernel GS (cpu_t)
     
-    ; 2. Save User RSP and load Kernel RSP
-    mov [syscall_scratch_rsp], rsp
+    ; Save User RSP to scratch space (first 8 bytes of cpu_t)
+    mov gs:[0], rsp
     
-    ; Load kernel stack from TSS (we need to find it)
-    ; Ideally use GS:[offset], but for now let's use a fixed location or the TSS global
-    ; Actually, let's just use the end of our static kernel stack?
-    ; Better: Get it from the TSS struct.
-    ; extern kernel_tss
-    ; rsp = kernel_tss.rsp0
-    mov rsp, [kernel_tss_rsp0_ptr]  ; Need to export this pointer or value!
+    ; Load Kernel RSP from TSS RSP0
+    ; cpu_t layout:
+    ;   0: syscall_scratch (8)
+    ;   8: lapic_id (4), cpu_id (4)
+    ;  16: gdt (56)
+    ;  72: tss (start)
+    ;  76: tss.rsp0 (offset 4 in tss)
+    mov rsp, gs:[76]
     
-    ; 3. Enable interrupts? No, typically syscalls run with interrupts disabled initially
-    ; or enabled. FMASK disabled them. Let's keep them disabled for now.
-    
-    ; 4. Save registers (System V ABI: RDI, RSI, RDX, RCX, R8, R9 are args)
-    ; But for syscall: R10 is 4th arg (instead of RCX, because RCX is RIP)
-    ; The kernel function syscall_handler expects standard ABI: RDI, RSI, RDX, RCX, R8, R9.
-    ; So we need to move R10 -> RCX.
-    ; But syscall_handler(num, arg1, arg2, arg3)
-    ;   num  = RDI (syscall number) -> actually user passes syscall num in RAX usually.
-    ;   Let's check our ABI.
-    ;   User: RAX=syscall#, RDI=arg1, RSI=arg2, RDX=arg3
-    ;   Kernel Handler: syscall_handler(num, arg1, arg2, arg3)
-    ;   So we need:
-    ;     RDI (Handler Arg1) = RAX (User Syscall#)
-    ;     RSI (Handler Arg2) = RDI (User Arg1)
-    ;     RDX (Handler Arg3) = RSI (User Arg2)
-    ;     RCX (Handler Arg4) = RDX (User Arg3)
-    
+    ; Save User RFLAGS and RIP (RCX/R11 are clobbered by sysret, but we need to preserve them)
     push r11    ; Save User RFLAGS
     push rcx    ; Save User RIP
     
-    ; Preserve callee-saved registers if needed, but we can trust C compiler to save them
-    ; except the ones we clobber.
+    ; Switch to Kernel Segments
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    ; SS is already Kernel (handled by CPU)
     
     ; Remap arguments for C function
     mov rcx, rdx    ; 4th arg = User Arg3
@@ -122,32 +92,26 @@ syscall_entry:
     mov rsi, rdi    ; 2nd arg = User Arg1
     mov rdi, rax    ; 1st arg = Syscall Number
     
-    ; Stack alignment (16 bytes)
-    ; We pushed 2 * 8 bytes (R11, RCX). RSP is 16-byte aligned if it started aligned.
-    
     call syscall_handler
     
-    ; Return value in RAX.
+    ; Restore User Segments
+    mov dx, 0x1B
+    mov ds, dx
+    mov es, dx
     
     pop rcx     ; Restore User RIP
     pop r11     ; Restore User RFLAGS
     
     ; Restore User Stack
-    mov rsp, [syscall_scratch_rsp]
+    mov rsp, gs:[0]
     
-    ; swapgs
+    swapgs      ; Swap back to User GS
     
     sysretq
-
-; Pointer to TSS RSP0 (initialized in C)
-section .data
-global kernel_tss_rsp0_ptr
-kernel_tss_rsp0_ptr: dq 0
 
 ; -----------------------------------------------------------------------------
 ; Interrupt Service Routines (ISRs)
 ; -----------------------------------------------------------------------------
-; ... (Rest of ISR code same as before)
 %macro ISR_NOERRCODE 1
     global isr%1
     isr%1:
@@ -172,6 +136,19 @@ kernel_tss_rsp0_ptr: dq 0
 %endrep
 
 isr_common_stub:
+    ; Stack: [Err] [Int] [RIP] [CS] ...
+    ; Check if we came from User Mode (CS & 3 == 3)
+    ; CS is at RSP + 24 (since we pushed Err and Int = 16 bytes, plus return address? No, jmp doesn't push)
+    ; Wait, `push 0`, `push %1`, `jmp`.
+    ; Stack: [Err] [Int] [RIP] [CS]
+    ; RSP points to Err.
+    ; CS is at RSP + 8 (Err) + 8 (Int) + 8 (RIP) = RSP + 24.
+    
+    cmp word [rsp + 24], 0x08   ; Check CS == Kernel Code
+    je .entry_kernel
+    swapgs                      ; Came from User, swap GS
+.entry_kernel:
+
     ; Save all general purpose registers
     push rax
     push rbx
@@ -189,93 +166,32 @@ isr_common_stub:
     push r14
     push r15
 
-    ; Save segment registers
+    ; Save segment registers (except GS)
     mov ax, ds
     push rax
     mov ax, es
     push rax
     mov ax, fs
     push rax
-    mov ax, gs
-    push rax
-
+    
     ; Load kernel data segment
     mov ax, 0x10
     mov ds, ax
     mov es, ax
     mov fs, ax
-    mov gs, ax
-
-    ; Get interrupt number (it's at RSP + (15 GPRs + 4 segs) * 8 + 8 = RSP + 160)
-    ; Stack: [GS FS ES DS R15..RAX] [error_code] [int_no] [RIP CS RFLAGS RSP SS]
-    mov rax, [rsp + 152]    ; Get interrupt number (152 = 19 * 8)
-
-    ; Check if this is timer interrupt (vector 32 = IRQ0)
-    cmp rax, 32
-    je .timer_irq
+    ; GS points to cpu_t via MSR (because we swapgs'd if needed)
     
-    ; Check if this is SMP Scheduler interrupt (vector 64)
-    cmp rax, 64
-    je .scheduler_irq
-
-    ; For other interrupts, call normal handler
     mov rdi, rsp
-    extern isr_handler
     call isr_handler
-    jmp .restore
-
-.timer_irq:
-    ; Timer interrupt - do context switch
-
-    ; First, increment tick counter
-    extern timer_tick
-    call timer_tick
-
-    ; Now do scheduler context switch
-    ; Pass current RSP to scheduler_switch
-    mov rdi, rsp
-    extern scheduler_switch
-    call scheduler_switch
-    ; RAX now contains new RSP
-
-    ; Switch to new task's stack
-    mov rsp, rax
-
-    ; Send EOI to PIC (acknowledge interrupt)
-    mov al, 0x20
-    out 0x20, al
     
-    jmp .restore
-
-.scheduler_irq:
-    ; SMP Scheduler Interrupt
-    
-    ; 1. Acknowledge LAPIC (EOI)
-    extern lapic_eoi
-    call lapic_eoi
-    
-    ; 2. Do scheduler context switch
-    mov rdi, rsp
-    extern scheduler_switch
-    call scheduler_switch
-    ; RAX now contains new RSP
-    
-    ; 3. Switch to new stack
-    mov rsp, rax
-    
-    jmp .restore
-
-.restore:
     ; Restore segment registers
-    pop rax
-    mov gs, ax
     pop rax
     mov fs, ax
     pop rax
     mov es, ax
     pop rax
     mov ds, ax
-
+    
     ; Restore general purpose registers
     pop r15
     pop r14
@@ -292,11 +208,17 @@ isr_common_stub:
     pop rcx
     pop rbx
     pop rax
+    
+    ; Check if returning to User Mode
+    ; Stack: [Err] [Int] [RIP] [CS]
+    cmp word [rsp + 24], 0x08
+    je .exit_kernel
+    swapgs                      ; Returning to User, swap GS
+.exit_kernel:
 
     ; Remove error code and interrupt number
     add rsp, 16
-
-    ; Return from interrupt
+    
     iretq
 
 global isr_stub_table
