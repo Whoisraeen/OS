@@ -44,7 +44,7 @@ void task_exit(void);
 void task_yield(void);
 uint32_t task_current_id(void);
 
-// Called by Timer ISR
-void scheduler_schedule(registers_t *regs);
+// Called by Timer ISR (returns new RSP)
+uint64_t scheduler_switch(registers_t *regs);
 
 #endif

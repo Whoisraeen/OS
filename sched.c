@@ -3,6 +3,7 @@
 #include "serial.h"
 #include "console.h"
 #include "idt.h"
+#include <stdbool.h>
 
 static task_t tasks[MAX_TASKS];
 static uint32_t current_task_id = 0;
@@ -135,11 +136,8 @@ uint64_t scheduler_switch(registers_t *regs) {
     // 4. Update TSS RSP0 (for Ring 3 -> Ring 0 transitions)
     if (tasks[current_task_id].stack_base) {
         uint64_t kstack_top = (uint64_t)tasks[current_task_id].stack_base + TASK_STACK_SIZE;
-        // Direct update of TSS RSP0 via pointer
-        extern uint64_t *kernel_tss_rsp0_ptr; 
-        if (kernel_tss_rsp0_ptr) {
-             *kernel_tss_rsp0_ptr = kstack_top;
-        }
+        extern uint64_t kernel_tss_rsp0_ptr; 
+        kernel_tss_rsp0_ptr = kstack_top;
     }
     
     // 5. Return new RSP
@@ -159,4 +157,24 @@ void task_exit(void) {
 
 void task_yield(void) {
     __asm__ volatile("int $32");
+}
+
+void scheduler_debug_print_tasks(void) {
+    kprintf("\n[SCHED] Task List:\n");
+    kprintf("  ID   State    Name\n");
+    kprintf("  --   -----    ----\n");
+    for (int i = 0; i < MAX_TASKS; i++) {
+        if (tasks[i].state != TASK_UNUSED) {
+            const char *state_str = "UNKNOWN";
+            switch(tasks[i].state) {
+                case TASK_READY: state_str = "READY"; break;
+                case TASK_RUNNING: state_str = "RUNNING"; break;
+                case TASK_SLEEPING: state_str = "SLEEPING"; break;
+                case TASK_TERMINATED: state_str = "DEAD"; break;
+                default: break;
+            }
+            kprintf("  %2d   %-8s %s\n", tasks[i].id, state_str, tasks[i].name);
+        }
+    }
+    kprintf("  Current Task: %d\n", current_task_id);
 }

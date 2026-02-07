@@ -1,0 +1,4 @@
+ld -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -T linker.ld kernel.o gdt.o idt.o pic.o keyboard.o pmm.o vmm.o heap.o serial.o console.o vfs.o initrd.o syscall.o user.o shell.o timer.o sched.o mouse.o desktop.o speaker.o compositor.o elf.o ipc.o security.o interrupts.o -o kernel.elf
+ld: sched.o: in function `task_create':
+/mnt/r/Projects/OS/sched.c:58: undefined reference to `pmm_alloc_pages'
+make: *** [Makefile:36: kernel.elf] Error 1

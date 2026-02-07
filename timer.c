@@ -41,8 +41,4 @@ void timer_sleep(uint32_t ms) {
 
 void timer_tick(void) {
     ticks++;
-    
-    // Call scheduler if available
-    extern void scheduler_tick(void);
-    scheduler_tick();
 }
