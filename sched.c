@@ -3,12 +3,14 @@
 #include "serial.h"
 #include "console.h"
 #include "idt.h"
+#include "cpu.h"
+#include "spinlock.h"
 #include <stdbool.h>
 
 static task_t tasks[MAX_TASKS];
-static uint32_t current_task_id = 0;
 static uint32_t num_tasks = 0;
 static bool scheduler_ready = false;
+static spinlock_t scheduler_lock = {0};
 
 // Global used by assembly to check if we need to switch
 uint64_t next_rsp = 0;
@@ -18,11 +20,7 @@ void scheduler_init(void) {
         tasks[i].state = TASK_UNUSED;
     }
     
-    // Create Kernel Task (Task 0)
-    // It is already running, so we don't need a stack allocated for it yet,
-    // (Wait, we DO need a place to save its state when we switch AWAY from it)
-    // But initially, its state is "running on current stack".
-    
+    // Create Kernel Task (Task 0) for BSP
     tasks[0].id = 0;
     tasks[0].state = TASK_RUNNING;
     // Name
@@ -32,14 +30,21 @@ void scheduler_init(void) {
     
     tasks[0].cr3 = 0; // Use current CR3 (kernel)
     
-    current_task_id = 0;
     num_tasks = 1;
     scheduler_ready = true;
+    
+    // Set BSP current task
+    cpu_t *cpu = get_cpu();
+    if (cpu) {
+        cpu->current_task = &tasks[0];
+    }
     
     kprintf("[SCHED] Scheduler Initialized. Main task ID: 0\n");
 }
 
 int task_create(const char *name, void (*entry)(void)) {
+    spinlock_acquire(&scheduler_lock);
+    
     // Find free slot
     int slot = -1;
     for (int i = 1; i < MAX_TASKS; i++) { // Start at 1
@@ -50,6 +55,7 @@ int task_create(const char *name, void (*entry)(void)) {
     }
     
     if (slot == -1) {
+        spinlock_release(&scheduler_lock);
         kprintf("[SCHED] No free task slots\n");
         return -1;
     }
@@ -57,12 +63,12 @@ int task_create(const char *name, void (*entry)(void)) {
     // Allocate stack
     void *stack = pmm_alloc_pages((TASK_STACK_SIZE + 4095) / 4096);
     if (!stack) {
+        spinlock_release(&scheduler_lock);
         kprintf("[SCHED] OOM allocating stack\n");
         return -1;
     }
     
     // We need virtual address for stack.
-    // Assuming identity map coverage is sufficient or using the returned HHDM address
     uint64_t hhdm = pmm_get_hhdm_offset();
     uint64_t stack_virt = (uint64_t)stack + hhdm;
     
@@ -104,12 +110,18 @@ int task_create(const char *name, void (*entry)(void)) {
     tasks[slot].name[31] = 0;
     
     num_tasks++;
+    spinlock_release(&scheduler_lock);
+    
     kprintf("[SCHED] Created Task %d (%s)\n", slot, name);
     return slot;
 }
 
 uint32_t task_current_id(void) {
-    return current_task_id;
+    cpu_t *cpu = get_cpu();
+    if (cpu && cpu->current_task) {
+        return ((task_t*)cpu->current_task)->id;
+    }
+    return 0;
 }
 
 // Function called by assembly to Switch Tasks
@@ -117,53 +129,85 @@ uint32_t task_current_id(void) {
 uint64_t scheduler_switch(registers_t *regs) {
     if (!scheduler_ready) return (uint64_t)regs;
     
-    // 1. Update current task's state
-    tasks[current_task_id].rsp = (uint64_t)regs;
+    spinlock_acquire(&scheduler_lock);
+    
+    cpu_t *cpu = get_cpu();
+    task_t *current = (task_t *)cpu->current_task;
+    
+    // 1. Update current task's state (if valid)
+    if (current) {
+        current->rsp = (uint64_t)regs;
+        if (current->state == TASK_RUNNING) {
+            current->state = TASK_READY;
+        }
+    }
     
     // 2. Select next task (Round Robin)
-    int next = -1;
-    for (int i = 1; i <= MAX_TASKS; i++) { // Search all other tasks
-        int idx = (current_task_id + i) % MAX_TASKS;
-        if (tasks[idx].state == TASK_READY || tasks[idx].state == TASK_RUNNING) {
-            next = idx;
+    // Start search from (current_id + 1)
+    int start_idx = current ? current->id + 1 : 0;
+    int next_slot = -1;
+    
+    for (int i = 0; i < MAX_TASKS; i++) {
+        int idx = (start_idx + i) % MAX_TASKS;
+        if (tasks[idx].state == TASK_READY) {
+            next_slot = idx;
             break;
         }
     }
     
-    // If no other task is ready, return current RSP
-    if (next == -1 || next == (int)current_task_id) {
-        return (uint64_t)regs; 
+    // If no other task is ready
+    if (next_slot == -1) {
+        if (current && current->state == TASK_READY) {
+            // Just continue with current task
+            current->state = TASK_RUNNING;
+            spinlock_release(&scheduler_lock);
+            return current->rsp;
+        } else {
+            // No tasks available (or current died). 
+            // If we have a current task, we might be forced to run it?
+            // If current was terminated, we have NOTHING to run.
+            // Return to caller (idle loop) if possible.
+            spinlock_release(&scheduler_lock);
+            return (uint64_t)regs;
+        }
     }
     
     // 3. Switch Task
-    tasks[current_task_id].state = TASK_READY;
-    current_task_id = next;
-    tasks[current_task_id].state = TASK_RUNNING;
+    task_t *next_task = &tasks[next_slot];
+    next_task->state = TASK_RUNNING;
+    cpu->current_task = next_task;
     
     // 4. Update TSS RSP0 (for Ring 3 -> Ring 0 transitions)
-    if (tasks[current_task_id].stack_base) {
-        uint64_t kstack_top = (uint64_t)tasks[current_task_id].stack_base + TASK_STACK_SIZE;
-        extern uint64_t kernel_tss_rsp0_ptr; 
-        kernel_tss_rsp0_ptr = kstack_top;
+    if (next_task->stack_base) {
+        uint64_t kstack_top = (uint64_t)next_task->stack_base + TASK_STACK_SIZE;
+        // Update per-CPU TSS
+        cpu->tss.rsp0 = kstack_top;
     }
     
     // 5. Return new RSP
-    // kprintf("[SCHED] Switch to %d\n", current_task_id);
-    return tasks[current_task_id].rsp;
+    spinlock_release(&scheduler_lock);
+    return next_task->rsp;
 }
 
 void task_exit(void) {
-    kprintf("[SCHED] Task %d exiting\n", current_task_id);
-    tasks[current_task_id].state = TASK_TERMINATED;
+    spinlock_acquire(&scheduler_lock);
+    cpu_t *cpu = get_cpu();
+    task_t *current = (task_t *)cpu->current_task;
+    
+    if (current) {
+        kprintf("[SCHED] Task %d exiting on CPU %d\n", current->id, cpu->cpu_id);
+        current->state = TASK_TERMINATED;
+    }
+    spinlock_release(&scheduler_lock);
     
     // Force yield
-    __asm__ volatile("int $32");
+    __asm__ volatile("int $0x40"); // Use SMP Scheduler Vector (64)
     // Should not return
     for(;;) __asm__("hlt");
 }
 
 void task_yield(void) {
-    __asm__ volatile("int $32");
+    __asm__ volatile("int $0x40"); // Use SMP Scheduler Vector (64)
 }
 
 void scheduler_debug_print_tasks(void) {
@@ -183,5 +227,5 @@ void scheduler_debug_print_tasks(void) {
             kprintf("  %2d   %-8s %s\n", tasks[i].id, state_str, tasks[i].name);
         }
     }
-    kprintf("  Current Task: %d\n", current_task_id);
 }
+

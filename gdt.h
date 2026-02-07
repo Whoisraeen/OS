@@ -60,6 +60,10 @@ struct tss {
 // Initialize GDT
 void gdt_init(void);
 
+// Setup GDT for a specific CPU
+void gdt_setup_cpu(struct gdt_entry *gdt_base, struct tss *tss_base);
+void gdt_set_gate_ptr(struct gdt_entry *gdt_base, int num, uint64_t base, uint64_t limit, uint8_t access, uint8_t gran);
+
 // Set kernel stack for TSS (called before returning to Ring 3)
 void tss_set_kernel_stack(uint64_t stack);
 

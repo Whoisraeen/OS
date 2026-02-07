@@ -35,6 +35,12 @@ typedef struct {
     
     // Wakeup time for sleeping tasks
     uint64_t wakeup_ticks;
+
+    // Linked List for Run Queue
+    struct task_t *next;
+    
+    // CPU Affinity (which CPU this task belongs to)
+    uint32_t cpu_id;
 } task_t;
 
 // API

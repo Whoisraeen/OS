@@ -213,6 +213,10 @@ isr_common_stub:
     ; Check if this is timer interrupt (vector 32 = IRQ0)
     cmp rax, 32
     je .timer_irq
+    
+    ; Check if this is SMP Scheduler interrupt (vector 64)
+    cmp rax, 64
+    je .scheduler_irq
 
     ; For other interrupts, call normal handler
     mov rdi, rsp
@@ -240,6 +244,26 @@ isr_common_stub:
     ; Send EOI to PIC (acknowledge interrupt)
     mov al, 0x20
     out 0x20, al
+    
+    jmp .restore
+
+.scheduler_irq:
+    ; SMP Scheduler Interrupt
+    
+    ; 1. Acknowledge LAPIC (EOI)
+    extern lapic_eoi
+    call lapic_eoi
+    
+    ; 2. Do scheduler context switch
+    mov rdi, rsp
+    extern scheduler_switch
+    call scheduler_switch
+    ; RAX now contains new RSP
+    
+    ; 3. Switch to new stack
+    mov rsp, rax
+    
+    jmp .restore
 
 .restore:
     ; Restore segment registers

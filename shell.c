@@ -22,6 +22,13 @@ static int streq(const char *a, const char *b) {
     return *a == *b;
 }
 
+// Get string length
+static size_t slen(const char *s) {
+    size_t len = 0;
+    while (*s++) len++;
+    return len;
+}
+
 // String starts with
 static int starts_with(const char *str, const char *prefix) {
     size_t len = slen(prefix);
@@ -31,13 +38,6 @@ static int starts_with(const char *str, const char *prefix) {
         if (str[i] != prefix[i]) return 0;
     }
     return 1;
-}
-
-// Get string length
-static size_t slen(const char *s) {
-    size_t len = 0;
-    while (*s++) len++;
-    return len;
 }
 
 // Command handlers

@@ -146,6 +146,10 @@ void _start(void) {
     
     // Switch to our page tables
     vmm_switch();
+
+    // Initialize SMP (Detect and wake up other cores)
+    extern void smp_init(void);
+    smp_init();
     
     // Initialize Timer (PIT for scheduling)
     extern void timer_init(void);

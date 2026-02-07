@@ -9,16 +9,56 @@ struct tss kernel_tss;
 extern void global_gdt_flush(uint64_t gdt_ptr);
 extern void tss_flush(void);
 
+// GDT entries (copied from gdt.c)
+// We need to replicate GDT setup for each core
+// Make this function non-static so cpu.c can use it, or move it to a shared header?
+// Better: Refactor gdt.c to export a setup function
+void gdt_setup_cpu(struct gdt_entry *gdt_base, struct tss *tss_base) {
+    // 0: Null
+    gdt_set_gate_ptr(gdt_base, 0, 0, 0, 0, 0);
+    
+    // 1: Kernel Code
+    gdt_set_gate_ptr(gdt_base, 1, 0, 0xFFFFFFFF, 0x9A, 0xA0);
+    
+    // 2: Kernel Data
+    gdt_set_gate_ptr(gdt_base, 2, 0, 0xFFFFFFFF, 0x92, 0xA0);
+    
+    // 3: User Data
+    gdt_set_gate_ptr(gdt_base, 3, 0, 0xFFFFFFFF, 0xF2, 0xA0);
+    
+    // 4: User Code
+    gdt_set_gate_ptr(gdt_base, 4, 0, 0xFFFFFFFF, 0xFA, 0xA0);
+    
+    // 5-6: TSS
+    uint64_t tss_addr = (uint64_t)tss_base;
+    uint32_t tss_limit = sizeof(struct tss) - 1;
+    
+    struct tss_entry *tss_desc = (struct tss_entry *)&gdt_base[5];
+    tss_desc->limit_low    = tss_limit & 0xFFFF;
+    tss_desc->base_low     = tss_addr & 0xFFFF;
+    tss_desc->base_middle  = (tss_addr >> 16) & 0xFF;
+    tss_desc->access       = 0x89;
+    tss_desc->granularity  = ((tss_limit >> 16) & 0x0F);
+    tss_desc->base_high    = (tss_addr >> 24) & 0xFF;
+    tss_desc->base_upper   = (tss_addr >> 32) & 0xFFFFFFFF;
+    tss_desc->reserved     = 0;
+}
+
 static void gdt_set_gate(int num, uint64_t base, uint64_t limit, uint8_t access, uint8_t gran) {
-    gdt[num].base_low    = (base & 0xFFFF);
-    gdt[num].base_middle = (base >> 16) & 0xFF;
-    gdt[num].base_high   = (base >> 24) & 0xFF;
+    gdt_set_gate_ptr(gdt, num, base, limit, access, gran);
+}
 
-    gdt[num].limit_low   = (limit & 0xFFFF);
-    gdt[num].granularity = (limit >> 16) & 0x0F;
+// Helper that takes a pointer to the entry
+void gdt_set_gate_ptr(struct gdt_entry *gdt_base, int num, uint64_t base, uint64_t limit, uint8_t access, uint8_t gran) {
+    gdt_base[num].base_low    = (base & 0xFFFF);
+    gdt_base[num].base_middle = (base >> 16) & 0xFF;
+    gdt_base[num].base_high   = (base >> 24) & 0xFF;
 
-    gdt[num].granularity |= (gran & 0xF0);
-    gdt[num].access      = access;
+    gdt_base[num].limit_low   = (limit & 0xFFFF);
+    gdt_base[num].granularity = (limit >> 16) & 0x0F;
+
+    gdt_base[num].granularity |= (gran & 0xF0);
+    gdt_base[num].access      = access;
 }
 
 static void tss_set_gate(int num, uint64_t base, uint64_t limit) {
