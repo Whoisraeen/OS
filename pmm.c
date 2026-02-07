@@ -145,6 +145,31 @@ void *pmm_alloc_page(void) {
     return NULL; // Out of memory
 }
 
+void *pmm_alloc_pages(size_t count) {
+    if (count == 0) return NULL;
+    
+    // Find contiguous range of free pages
+    uint64_t start = 1; // Skip page 0
+    uint64_t found = 0;
+    
+    for (uint64_t i = 1; i < highest_page; i++) {
+        if (!bitmap_test(i)) {
+            if (found == 0) start = i;
+            found++;
+            if (found == count) {
+                // Success! Mark them as used and return
+                for (uint64_t j = 0; j < count; j++) {
+                    bitmap_set(start + j);
+                }
+                return (void *)(start * PAGE_SIZE);
+            }
+        } else {
+            found = 0;
+        }
+    }
+    return NULL; // Out of memory
+}
+
 void pmm_free_page(void *ptr) {
     uint64_t addr = (uint64_t)ptr;
     uint64_t page = addr / PAGE_SIZE;

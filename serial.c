@@ -1,7 +1,10 @@
 #include "serial.h"
 #include "io.h"
+#include "spinlock.h"
 
 #define COM1_PORT 0x3F8
+
+static spinlock_t serial_lock;
 
 // Check if transmit buffer is empty
 static int serial_is_transmit_empty(void) {
@@ -178,4 +181,6 @@ void kprintf(const char *fmt, ...) {
     }
     
     va_end(args);
+    
+    spinlock_release(&serial_lock);
 }

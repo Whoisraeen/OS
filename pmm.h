@@ -10,6 +10,7 @@
 
 void pmm_init(void);
 void *pmm_alloc_page(void);
+void *pmm_alloc_pages(size_t count);
 void pmm_free_page(void *ptr);
 uint64_t pmm_get_hhdm_offset(void);
 

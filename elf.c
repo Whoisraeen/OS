@@ -143,6 +143,16 @@ void elf_execute(uint64_t entry_point) {
         return;
     }
     
+    // SECURITY FIX: Map stack as USER accessible
+    extern uint64_t pmm_get_hhdm_offset(void);
+    uint64_t hhdm = pmm_get_hhdm_offset();
+    uint64_t stack_phys = (uint64_t)stack - hhdm;
+    
+    for (size_t i = 0; i < stack_size; i += 4096) {
+        extern void vmm_map_user_page(uint64_t virt, uint64_t phys);
+        vmm_map_user_page((uint64_t)stack + i, stack_phys + i);
+    }
+    
     // Initialize Security Context for PID 1 (Mock User Process)
     // In a real OS, fork() or spawn() does this.
     extern void *security_create_context(uint32_t pid, uint32_t parent_pid);

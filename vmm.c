@@ -118,7 +118,9 @@ void vmm_init(void) {
     
     for (uint64_t phys = 0; phys < phys_to_map; phys += PAGE_SIZE) {
         uint64_t virt = hhdm_offset + phys;
-        vmm_map_page(virt, phys, PTE_WRITABLE | PTE_USER); // Allow Ring 3 access for now
+        // KERNEL SECURITY: Only PTE_WRITABLE, NO PTE_USER!
+        // This prevents Ring 3 from accessing kernel memory
+        vmm_map_page(virt, phys, PTE_WRITABLE); 
     }
     
     // Map the kernel (it's loaded at kernel_addr->virtual_base from kernel_addr->physical_base)
@@ -129,11 +131,8 @@ void vmm_init(void) {
         uint64_t kernel_size = 16 * 1024 * 1024; // 16 MB (generous)
         
         for (uint64_t offset = 0; offset < kernel_size; offset += PAGE_SIZE) {
-            vmm_map_page(kernel_virt + offset, kernel_phys + offset, PTE_WRITABLE | PTE_USER); // User access to kernel code for jumping?
-            // Actually kernel code pages should be User accessible only if we jump there? 
-            // no, we jump to ELF loaded code.
-            // But we need to access kernel data?
-            // Let's safe bet: map everything USER for this stage.
+            // KERNEL SECURITY: Kernel code/data must NOT be accessible to User
+            vmm_map_page(kernel_virt + offset, kernel_phys + offset, PTE_WRITABLE);
         }
     }
     
@@ -148,7 +147,12 @@ void vmm_init(void) {
         fb_size = (fb_size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
         
         for (uint64_t offset = 0; offset < fb_size; offset += PAGE_SIZE) {
-            vmm_map_page(fb_virt + offset, fb_phys + offset, PTE_WRITABLE | PTE_USER);
+            // Framebuffer needs to be USER accessible for the compositor?
+            // If compositor runs in kernel, it's fine.
+            // But if we want user apps to draw, we might need it.
+            // Ideally, only the compositor (kernel/service) touches it.
+            // Let's make it Kernel-only for now to be safe.
+            vmm_map_page(fb_virt + offset, fb_phys + offset, PTE_WRITABLE);
         }
     }
 }

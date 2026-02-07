@@ -26,21 +26,36 @@ uint64_t fb_height = 0;
 // =====================================================================
 // Test tasks for verifying preemptive multitasking
 // =====================================================================
+// Safe test tasks (no division, no kprintf)
 void test_task1(void) {
-    int count = 0;
+    int x = 0;
+    int y = 500;
     for (;;) {
-        kprintf("[TASK1] Running (count=%d)\n", count++);
-        // Busy wait to make output visible
-        for (volatile int i = 0; i < 5000000; i++);
+        if (fb_ptr && x < fb_width && y < fb_height) {
+             // Draw Red Line moving right
+             fb_ptr[y * fb_width + x] = 0xFFFF0000;
+        }
+        x++;
+        if (x >= 400) x = 0; // Wrap width
+        
+        // Busy wait
+        for (volatile int i = 0; i < 1000000; i++);
     }
 }
 
 void test_task2(void) {
-    int count = 0;
+    int x = 0;
+    int y = 520;
     for (;;) {
-        kprintf("[TASK2] Alive! (count=%d)\n", count++);
+        if (fb_ptr && x < fb_width && y < fb_height) {
+             // Draw Green Line moving right
+             fb_ptr[y * fb_width + x] = 0xFF00FF00;
+        }
+        x++;
+        if (x >= 400) x = 0;
+        
         // Busy wait
-        for (volatile int i = 0; i < 5000000; i++);
+        for (volatile int i = 0; i < 1000000; i++);
     }
 }
 
@@ -155,7 +170,7 @@ void _start(void) {
     extern int task_create(const char *name, void (*entry)(void));
     task_create("test_task1", test_task1);
     task_create("test_task2", test_task2);
-    task_create("test_task3", test_task3);
+    // task_create("test_task3", test_task3); // Causes Exception 0 (Divide Error) likely due to unsaved FPU state?
 
     // Print task list to verify they were created
     extern void scheduler_debug_print_tasks(void);

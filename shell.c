@@ -24,9 +24,11 @@ static int streq(const char *a, const char *b) {
 
 // String starts with
 static int starts_with(const char *str, const char *prefix) {
-    while (*prefix) {
-        if (*str != *prefix) return 0;
-        str++; prefix++;
+    size_t len = slen(prefix);
+    if (slen(str) < len) return 0;
+    
+    for (size_t i = 0; i < len; i++) {
+        if (str[i] != prefix[i]) return 0;
     }
     return 1;
 }

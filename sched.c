@@ -74,17 +74,24 @@ int task_create(const char *name, void (*entry)(void)) {
     // Registers_t layout (matches interrupts.S pop order)
     // ss, rsp, rflags, cs, rip, err, int, rax, rbx, rcx, rdx, rsi, rdi, rbp, r8-r15
     
+    // Calculate stack top again to be sure
+    uint64_t stack_top = stack_virt + TASK_STACK_SIZE;
+    sp = (uint64_t *)stack_top;
+
     *--sp = 0x10;          // SS (Kernel Data)
-    *--sp = (uint64_t)sp;  // RSP (this stack) - Wait, this value will be ignored by iretq in Ring 0? 
-                           // No, iretq restores mechanism. But if staying in Ring 0, effectively yes.
-                           // Actually we want RSP to be the value BEFORE interrupt.
-                           // Since we are creating a new kernel thread, it starts "as if" interrupted.
+    *--sp = stack_top;     // RSP (this stack)
     *--sp = 0x202;         // RFLAGS (IF=1)
     *--sp = 0x08;          // CS (Kernel Code)
     *--sp = (uint64_t)entry; // RIP
     
     *--sp = 0; // err_code
     *--sp = 0; // int_no
+    
+    // Segment registers (GS, FS, ES, DS)
+    *--sp = 0x10; // GS
+    *--sp = 0x10; // FS
+    *--sp = 0x10; // ES
+    *--sp = 0x10; // DS
     
     // GPRs
     for(int i=0; i<15; i++) *--sp = 0;

@@ -1,17 +1,29 @@
 #include "heap.h"
 #include "pmm.h"
 #include "serial.h"
+#include "spinlock.h"
 #include <stddef.h>
+#include <stdbool.h>
 
-// Simple bump allocator for kernel heap
-// We allocate pages from PMM and bump-allocate within them
+// Linked List Allocator
+// Supports kfree() to prevent memory leaks
 
-static uint8_t *heap_start = NULL;
-static uint8_t *heap_current = NULL;
-static uint8_t *heap_end = NULL;
+typedef struct block_header {
+    size_t size;            // Size of the data block (excluding header)
+    struct block_header *next;
+    bool is_free;
+    uint32_t magic;         // To detect corruption
+} block_header_t;
 
-// Initial heap size (1024 pages = 4MB - enough for back buffer)
-#define INITIAL_HEAP_PAGES 1024
+#define HEAP_MAGIC 0xC0FFEE
+#define HEADER_SIZE sizeof(block_header_t)
+
+static block_header_t *head = NULL;
+static spinlock_t heap_lock;
+
+// Statistics
+static size_t total_heap_size = 0;
+static size_t used_heap_size = 0;
 
 // Get HHDM offset from PMM
 extern uint64_t pmm_get_hhdm_offset(void);
@@ -21,74 +33,144 @@ static void *phys_to_virt(uint64_t phys) {
 }
 
 void heap_init(void) {
-    // Allocate initial heap pages
-    uint64_t first_page_phys = (uint64_t)pmm_alloc_page();
-    if (first_page_phys == 0) {
-        kprintf("[HEAP] Failed to allocate first page!\n");
-        return;
-    }
-    
-    heap_start = (uint8_t *)phys_to_virt(first_page_phys);
-    heap_current = heap_start;
-    heap_end = heap_start + 4096; // Start with one page
-    
-    // Allocate more pages for initial heap (we need ~4MB for back buffer)
-    int pages_allocated = 1;
-    for (int i = 1; i < INITIAL_HEAP_PAGES; i++) {
-        uint64_t page_phys = (uint64_t)pmm_alloc_page();
-        if (page_phys == 0) break;
-        
-        // These pages should be contiguous in virtual space (HHDM)
-        // In practice, this works because HHDM maps all physical memory linearly
-        heap_end += 4096;
-        pages_allocated++;
-    }
-    
-    size_t heap_size = heap_end - heap_start;
-    kprintf("[HEAP] Initialized: %lu KB (%d pages)\n", heap_size / 1024, pages_allocated);
+    spinlock_init(&heap_lock);
+    kprintf("[HEAP] Initializing Linked List Heap...\n");
+    head = NULL;
+    total_heap_size = 0;
+    used_heap_size = 0;
 }
 
 void *kmalloc(size_t size) {
-    if (heap_start == NULL) {
-        heap_init();
-    }
+    spinlock_acquire(&heap_lock);
     
-    // Align size to 8 bytes
-    size = (size + 7) & ~7;
+    // Align size to 16 bytes
+    size = (size + 15) & ~15;
     
-    // Check if we have space
-    while (heap_current + size > heap_end) {
-        // Need more pages - try to extend
-        uint64_t new_page_phys = (uint64_t)pmm_alloc_page();
-        if (new_page_phys == 0) {
-            kprintf("[HEAP] kmalloc(%lu) failed - out of memory!\n", size);
-            return NULL; // Out of memory
+    // 1. Search for free block
+    block_header_t *curr = head;
+    while (curr) {
+        if (curr->magic != HEAP_MAGIC) {
+            kprintf("[HEAP] CORRUPTION DETECTED at %p\n", curr);
+            spinlock_release(&heap_lock);
+            return NULL;
         }
         
-        // Extend the heap
-        heap_end += 4096;
+        if (curr->is_free && curr->size >= size) {
+            // Found a suitable block
+            // Split if significantly larger
+            if (curr->size >= size + HEADER_SIZE + 32) {
+                block_header_t *new_block = (block_header_t *)((uint8_t*)curr + HEADER_SIZE + size);
+                new_block->size = curr->size - size - HEADER_SIZE;
+                new_block->is_free = true;
+                new_block->next = curr->next;
+                new_block->magic = HEAP_MAGIC;
+                
+                curr->size = size;
+                curr->next = new_block;
+            }
+            
+            curr->is_free = false;
+            used_heap_size += curr->size + HEADER_SIZE;
+            
+            spinlock_release(&heap_lock);
+            return (void*)(curr + 1);
+        }
+        curr = curr->next;
     }
     
-    void *result = heap_current;
-    heap_current += size;
+    // 2. No block found, allocate new page(s)
+    size_t total_req_size = size + HEADER_SIZE;
+    size_t pages_needed = (total_req_size + 4095) / 4096;
     
-    return result;
+    // If it's a small allocation, allocate at least 4 pages to reduce fragmentation
+    if (pages_needed < 4) pages_needed = 4;
+    
+    void *new_mem = NULL;
+    
+    // Use pmm_alloc_pages for contiguous physical memory
+    // Note: This relies on HHDM mapping contiguous physical pages to contiguous virtual addresses
+    uint64_t phys = 0;
+    if (pages_needed > 1) {
+         phys = (uint64_t)pmm_alloc_pages(pages_needed);
+    } else {
+         phys = (uint64_t)pmm_alloc_page();
+    }
+    
+    if (phys == 0) {
+        spinlock_release(&heap_lock);
+        kprintf("[HEAP] OOM: Failed to allocate %lu bytes (%lu pages)\n", size, pages_needed);
+        return NULL;
+    }
+    
+    new_mem = phys_to_virt(phys);
+    
+    // Create new block
+    block_header_t *new_block = (block_header_t *)new_mem;
+    new_block->size = (pages_needed * 4096) - HEADER_SIZE;
+    new_block->is_free = true; // Temporarily free
+    new_block->magic = HEAP_MAGIC;
+    new_block->next = head;
+    head = new_block;
+    
+    total_heap_size += pages_needed * 4096;
+    
+    // Use the new block (split logic)
+    if (new_block->size >= size + HEADER_SIZE + 32) {
+        block_header_t *split = (block_header_t *)((uint8_t*)new_block + HEADER_SIZE + size);
+        split->size = new_block->size - size - HEADER_SIZE;
+        split->is_free = true;
+        split->next = new_block->next; // Point to old head
+        split->magic = HEAP_MAGIC;
+        
+        new_block->size = size;
+        new_block->next = split;
+    }
+    
+    new_block->is_free = false;
+    used_heap_size += new_block->size + HEADER_SIZE;
+    
+    spinlock_release(&heap_lock);
+    return (void*)(new_block + 1);
 }
 
 void kfree(void *ptr) {
-    // Simple bump allocator doesn't support freeing individual allocations
-    // In a real OS, we'd use a more sophisticated allocator (slab, buddy, etc.)
-    // For now, this is a no-op
-    (void)ptr;
+    if (!ptr) return;
+    
+    spinlock_acquire(&heap_lock);
+    
+    block_header_t *header = (block_header_t *)((uint8_t*)ptr - HEADER_SIZE);
+    
+    if (header->magic != HEAP_MAGIC) {
+        kprintf("[HEAP] Double free or corruption at %p\n", ptr);
+        spinlock_release(&heap_lock);
+        return;
+    }
+    
+    header->is_free = true;
+    used_heap_size -= (header->size + HEADER_SIZE);
+    
+    // Simple Coalescing: Check next block
+    // Only works if next block is physically/virtually adjacent and in the list
+    // Our list is not sorted, but 'next' pointer might point to adjacent block if it was split
+    if (header->next && header->next->is_free) {
+        // Check if they are adjacent in memory
+        if ((uint8_t*)header + HEADER_SIZE + header->size == (uint8_t*)header->next) {
+            // Merge
+            block_header_t *next = header->next;
+            header->size += HEADER_SIZE + next->size;
+            header->next = next->next;
+            // 'next' is now gone
+        }
+    }
+    
+    spinlock_release(&heap_lock);
 }
 
 // Get heap stats
 size_t heap_used(void) {
-    if (heap_start == NULL) return 0;
-    return heap_current - heap_start;
+    return used_heap_size;
 }
 
 size_t heap_free(void) {
-    if (heap_start == NULL) return 0;
-    return heap_end - heap_current;
+    return total_heap_size - used_heap_size;
 }
