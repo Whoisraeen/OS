@@ -26,6 +26,7 @@ typedef enum {
     TASK_READY,
     TASK_RUNNING,
     TASK_SLEEPING,
+    TASK_BLOCKED,       // Blocked on mutex/semaphore/IPC
     TASK_TERMINATED
 } task_state_t;
 
@@ -58,6 +59,16 @@ uint32_t task_current_id(void);
 
 // Called by Timer ISR (returns new RSP)
 uint64_t scheduler_switch(registers_t *regs);
+
+// Block current task (must be called with interrupts disabled or from ISR context)
+// The task is set to TASK_BLOCKED and yields. Caller must arrange for task_unblock() later.
+void task_block(void);
+
+// Unblock a specific task (moves it from BLOCKED to READY on its assigned CPU's run queue)
+void task_unblock(task_t *task);
+
+// Get a task by its ID (returns NULL if invalid or unused)
+task_t *task_get_by_id(uint32_t id);
 
 // Debug
 void scheduler_debug_print_tasks(void);

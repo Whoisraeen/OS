@@ -43,6 +43,11 @@ static inline void vmm_invlpg(uint64_t addr) {
 void vmm_init(void);
 void vmm_map_page(uint64_t virt, uint64_t phys, uint64_t flags);
 void vmm_map_user_page(uint64_t virt, uint64_t phys);
+void vmm_unmap_page(uint64_t virt);
+
+// Free all user-space page tables and mapped pages for a given PML4 (physical address)
+// Does NOT free kernel-space entries (indices 256-511)
+void vmm_destroy_user_space(uint64_t pml4_phys_addr);
 void vmm_switch(void);
 
 // Helper to get HHDM offset (defined in vmm.c)

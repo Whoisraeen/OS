@@ -3,6 +3,7 @@
 #include "vmm.h"
 #include "heap.h"
 #include "serial.h"
+#include "sched.h"
 #include <stddef.h>
 
 // Internal Port Structure (kernel-side)
@@ -225,10 +226,12 @@ int ipc_send_message(ipc_port_t dest_port, ipc_message_t *msg,
     port->queue_count++;
 
     // If a process is waiting on this port, wake it up
-    // (In full implementation, integrate with scheduler)
     if (port->waiting_pid != 0) {
-        // TODO: Wake up process (scheduler integration)
+        task_t *waiter = task_get_by_id(port->waiting_pid);
         port->waiting_pid = 0;
+        if (waiter && waiter->state == TASK_BLOCKED) {
+            task_unblock(waiter);
+        }
     }
 
     kprintf("[IPC] Message sent: PID %d -> port %d (msg_id=%d, size=%d)\n",
@@ -257,14 +260,13 @@ int ipc_recv_message(ipc_port_t port, ipc_message_t *msg,
             return IPC_ERR_NO_MESSAGE;
         }
 
-        // Blocking receive - mark process as waiting
+        // Blocking receive: mark as waiting and sleep until a message arrives
         iport->waiting_pid = receiver_pid;
 
-        // TODO: In full implementation, block the process using scheduler
-        // For now, just spin-wait briefly (this is a placeholder)
-        // In production, this would call scheduler_block_on_ipc(port)
+        // Block current task — ipc_send_message will call task_unblock
+        task_block();
 
-        // If still no message after "waiting", return error
+        // Woke up — check again (message should be available now)
         if (iport->queue_count == 0) {
             return IPC_ERR_NO_MESSAGE;
         }

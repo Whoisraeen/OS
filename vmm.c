@@ -158,6 +158,31 @@ void vmm_init(void) {
     }
 }
 
+void vmm_unmap_page(uint64_t virt) {
+    uint64_t current_pml4_phys;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(current_pml4_phys));
+    current_pml4_phys &= PTE_ADDR_MASK;
+
+    uint64_t *cur_pml4 = (uint64_t *)phys_to_virt(current_pml4_phys);
+
+    size_t idx4 = PML4_INDEX(virt);
+    if (!(cur_pml4[idx4] & PTE_PRESENT)) return;
+
+    uint64_t *pdpt = (uint64_t *)phys_to_virt(cur_pml4[idx4] & PTE_ADDR_MASK);
+    size_t idx3 = PDPT_INDEX(virt);
+    if (!(pdpt[idx3] & PTE_PRESENT)) return;
+
+    uint64_t *pd = (uint64_t *)phys_to_virt(pdpt[idx3] & PTE_ADDR_MASK);
+    size_t idx2 = PD_INDEX(virt);
+    if (!(pd[idx2] & PTE_PRESENT)) return;
+
+    uint64_t *pt = (uint64_t *)phys_to_virt(pd[idx2] & PTE_ADDR_MASK);
+    size_t idx1 = PT_INDEX(virt);
+
+    pt[idx1] = 0;
+    vmm_invlpg(virt);
+}
+
 void vmm_switch(void) {
     __asm__ volatile (
         "mov %0, %%cr3"
@@ -214,6 +239,48 @@ void vmm_map_user_page(uint64_t virt, uint64_t phys) {
     uint64_t *pt = (uint64_t *)phys_to_virt(pd[pd_idx] & PTE_ADDR_MASK);
     pt[pt_idx] = (phys & PTE_ADDR_MASK) | PTE_PRESENT | PTE_WRITABLE | PTE_USER;
     vmm_invlpg(virt);
+}
+
+void vmm_destroy_user_space(uint64_t pml4_phys_addr) {
+    if (!pml4_phys_addr) return;
+
+    uint64_t *pml4 = (uint64_t *)phys_to_virt(pml4_phys_addr);
+
+    // Walk user-space entries only (indices 0-255)
+    for (int i4 = 0; i4 < 256; i4++) {
+        if (!(pml4[i4] & PTE_PRESENT)) continue;
+
+        uint64_t *pdpt = (uint64_t *)phys_to_virt(pml4[i4] & PTE_ADDR_MASK);
+        for (int i3 = 0; i3 < 512; i3++) {
+            if (!(pdpt[i3] & PTE_PRESENT)) continue;
+
+            uint64_t *pd = (uint64_t *)phys_to_virt(pdpt[i3] & PTE_ADDR_MASK);
+            for (int i2 = 0; i2 < 512; i2++) {
+                if (!(pd[i2] & PTE_PRESENT)) continue;
+                if (pd[i2] & PTE_HUGE) {
+                    // 2MB page — skip (we don't allocate these yet)
+                    continue;
+                }
+
+                uint64_t *pt = (uint64_t *)phys_to_virt(pd[i2] & PTE_ADDR_MASK);
+                for (int i1 = 0; i1 < 512; i1++) {
+                    if (pt[i1] & PTE_PRESENT) {
+                        uint64_t page_phys = pt[i1] & PTE_ADDR_MASK;
+                        pmm_free_page((void *)page_phys);
+                    }
+                }
+                // Free the PT itself
+                pmm_free_page((void *)(pd[i2] & PTE_ADDR_MASK));
+            }
+            // Free the PD
+            pmm_free_page((void *)(pdpt[i3] & PTE_ADDR_MASK));
+        }
+        // Free the PDPT
+        pmm_free_page((void *)(pml4[i4] & PTE_ADDR_MASK));
+    }
+
+    // Free the PML4 itself
+    pmm_free_page((void *)pml4_phys_addr);
 }
 
 uint64_t vmm_get_pml4(void) {

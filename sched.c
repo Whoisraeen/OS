@@ -283,8 +283,26 @@ uint64_t scheduler_switch(registers_t *regs) {
         if (current->state == TASK_RUNNING) {
             current->state = TASK_READY;
             sched_enqueue(cpu, current);
+        } else if (current->state == TASK_BLOCKED) {
+            cpu->current_task = NULL;
         } else if (current->state == TASK_TERMINATED) {
             cpu->current_task = NULL;
+            // Deferred cleanup: free user address space and kernel stack
+            // Safe because we're about to switch to a different stack
+            if (current->cr3) {
+                vmm_destroy_user_space(current->cr3);
+                current->cr3 = 0;
+            }
+            if (current->stack_base) {
+                uint64_t hhdm = pmm_get_hhdm_offset();
+                uint64_t phys = (uint64_t)current->stack_base - hhdm;
+                pmm_free_pages((void *)phys, (TASK_STACK_SIZE + 4095) / 4096);
+                current->stack_base = NULL;
+            }
+            current->state = TASK_UNUSED;
+            spinlock_acquire(&tasks_alloc_lock);
+            num_tasks--;
+            spinlock_release(&tasks_alloc_lock);
         }
     }
 
@@ -327,6 +345,39 @@ uint64_t scheduler_switch(registers_t *regs) {
     return next->rsp;
 }
 
+task_t *task_get_by_id(uint32_t id) {
+    if (id >= MAX_TASKS) return NULL;
+    if (tasks[id].state == TASK_UNUSED) return NULL;
+    return &tasks[id];
+}
+
+void task_block(void) {
+    cpu_t *cpu = get_cpu();
+    if (!cpu) return;
+
+    spinlock_acquire(&cpu->lock);
+    task_t *current = (task_t *)cpu->current_task;
+    if (current) {
+        current->state = TASK_BLOCKED;
+    }
+    spinlock_release(&cpu->lock);
+
+    // Yield — scheduler_switch will NOT re-enqueue a BLOCKED task
+    __asm__ volatile("int $0x40");
+}
+
+void task_unblock(task_t *task) {
+    if (!task || task->state != TASK_BLOCKED) return;
+
+    cpu_t *target_cpu = smp_get_cpu_by_id(task->cpu_id);
+    if (!target_cpu) return;
+
+    spinlock_acquire(&target_cpu->lock);
+    task->state = TASK_READY;
+    sched_enqueue(target_cpu, task);
+    spinlock_release(&target_cpu->lock);
+}
+
 void task_exit(void) {
     cpu_t *cpu = get_cpu();
 
@@ -360,6 +411,7 @@ void scheduler_debug_print_tasks(void) {
                 case TASK_READY: state_str = "READY"; break;
                 case TASK_RUNNING: state_str = "RUNNING"; break;
                 case TASK_SLEEPING: state_str = "SLEEPING"; break;
+                case TASK_BLOCKED: state_str = "BLOCKED"; break;
                 case TASK_TERMINATED: state_str = "DEAD"; break;
                 default: break;
             }
