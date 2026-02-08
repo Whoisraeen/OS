@@ -7,6 +7,9 @@
 #include "security.h"
 #include "sched.h"
 #include "vmm.h"
+#include "vfs.h"
+#include "initrd.h"
+#include "heap.h"
 
 // MSR registers
 #define MSR_EFER     0xC0000080
@@ -100,7 +103,64 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             // arg1 = name ptr
             return (uint64_t)ipc_port_lookup((const char *)arg1);
         }
+
+        case SYS_IPC_REGISTER: {
+            // arg1 = port, arg2 = name ptr
+            return (uint64_t)ipc_port_register((uint32_t)arg1, (const char *)arg2);
+        }
+
+        case SYS_IPC_SHMEM_CREATE: {
+            // arg1 = size, arg2 = flags
+            return (uint64_t)ipc_shmem_create((size_t)arg1, current_pid, (uint32_t)arg2);
+        }
+
+        case SYS_IPC_SHMEM_MAP: {
+            // arg1 = shmem_id
+            return (uint64_t)ipc_shmem_map((uint32_t)arg1, current_pid);
+        }
+
+        case SYS_IPC_SHMEM_UNMAP: {
+            // arg1 = shmem_id
+            return (uint64_t)ipc_shmem_unmap((uint32_t)arg1, current_pid);
+        }
         
+        // === Process Management Syscalls ===
+        case SYS_PROC_EXEC: {
+            // arg1 = path (const char *)
+            if (!arg1) return -1;
+            
+            const char *path = (const char *)arg1;
+            
+            // NOTE: path is in USER space. Kernel can access it if mapping exists.
+            // For robustness, we should verify it or copy it safely.
+            // Assuming direct access is fine for now (no SMAP/SMEP).
+            
+            // Find file in VFS (Initrd)
+            vfs_node_t *node = initrd_find(path);
+            if (!node) {
+                kprintf("[SYSCALL] exec: file not found '%s'\n", path);
+                return -1;
+            }
+            
+            // Allocate kernel buffer
+            void *data = kmalloc(node->length);
+            if (!data) return -1;
+            
+            // Read file
+            vfs_read(node, 0, node->length, (uint8_t*)data);
+            
+            // Create Task
+            extern int task_create_user(const char *name, const void *elf_data, size_t size);
+            int pid = task_create_user(path, data, node->length);
+            
+            kfree(data);
+            
+            if (pid >= 0) {
+                kprintf("[SYSCALL] exec: started '%s' (PID %d)\n", path, pid);
+            }
+            return pid;
+        }
+
         // === Graphics/Input Syscalls ===
         case SYS_GET_FRAMEBUFFER: {
             // arg1 = struct fb_info *info

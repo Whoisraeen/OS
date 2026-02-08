@@ -5,55 +5,55 @@
 #include <stdbool.h>
 
 // Capability Bits (fine-grained permissions)
-typedef enum {
-    // File System Capabilities
-    CAP_FILE_READ          = (1ULL << 0),   // Read files
-    CAP_FILE_WRITE         = (1ULL << 1),   // Write/modify files
-    CAP_FILE_EXECUTE       = (1ULL << 2),   // Execute programs
-    CAP_FILE_CREATE        = (1ULL << 3),   // Create new files
-    CAP_FILE_DELETE        = (1ULL << 4),   // Delete files
-    CAP_FILE_CHOWN         = (1ULL << 5),   // Change file ownership
+typedef uint64_t capability_t;
 
-    // Network Capabilities
-    CAP_NET_BIND           = (1ULL << 10),  // Bind to network ports
-    CAP_NET_CONNECT        = (1ULL << 11),  // Connect to remote hosts
-    CAP_NET_RAW            = (1ULL << 12),  // Raw socket access
-    CAP_NET_PACKET         = (1ULL << 13),  // Packet-level network access
+// File System Capabilities
+#define CAP_FILE_READ          (1ULL << 0)   // Read files
+#define CAP_FILE_WRITE         (1ULL << 1)   // Write/modify files
+#define CAP_FILE_EXECUTE       (1ULL << 2)   // Execute programs
+#define CAP_FILE_CREATE        (1ULL << 3)   // Create new files
+#define CAP_FILE_DELETE        (1ULL << 4)   // Delete files
+#define CAP_FILE_CHOWN         (1ULL << 5)   // Change file ownership
 
-    // Hardware Capabilities
-    CAP_HW_DISK            = (1ULL << 20),  // Direct disk access
-    CAP_HW_USB             = (1ULL << 21),  // USB device access
-    CAP_HW_AUDIO           = (1ULL << 22),  // Audio hardware access
-    CAP_HW_VIDEO           = (1ULL << 23),  // Video/framebuffer access
-    CAP_HW_INPUT           = (1ULL << 24),  // Input devices (keyboard, mouse)
-    CAP_HW_SERIAL          = (1ULL << 25),  // Serial port access
+// Network Capabilities
+#define CAP_NET_BIND           (1ULL << 10)  // Bind to network ports
+#define CAP_NET_CONNECT        (1ULL << 11)  // Connect to remote hosts
+#define CAP_NET_RAW            (1ULL << 12)  // Raw socket access
+#define CAP_NET_PACKET         (1ULL << 13)  // Packet-level network access
 
-    // IPC Capabilities
-    CAP_IPC_CREATE         = (1ULL << 30),  // Create IPC ports
-    CAP_IPC_SEND           = (1ULL << 31),  // Send messages
-    CAP_IPC_RECV           = (1ULL << 32),  // Receive messages
-    CAP_IPC_SHMEM          = (1ULL << 33),  // Shared memory access
+// Hardware Capabilities
+#define CAP_HW_DISK            (1ULL << 20)  // Direct disk access
+#define CAP_HW_USB             (1ULL << 21)  // USB device access
+#define CAP_HW_AUDIO           (1ULL << 22)  // Audio hardware access
+#define CAP_HW_VIDEO           (1ULL << 23)  // Video/framebuffer access
+#define CAP_HW_INPUT           (1ULL << 24)  // Input devices (keyboard, mouse)
+#define CAP_HW_SERIAL          (1ULL << 25)  // Serial port access
 
-    // Process Management Capabilities
-    CAP_PROC_FORK          = (1ULL << 40),  // Fork processes
-    CAP_PROC_EXEC          = (1ULL << 41),  // Execute programs
-    CAP_PROC_KILL          = (1ULL << 42),  // Kill other processes
-    CAP_PROC_SETPRIORITY   = (1ULL << 43),  // Change process priority
-    CAP_PROC_PTRACE        = (1ULL << 44),  // Debug/trace processes
+// IPC Capabilities
+#define CAP_IPC_CREATE         (1ULL << 30)  // Create IPC ports
+#define CAP_IPC_SEND           (1ULL << 31)  // Send messages
+#define CAP_IPC_RECV           (1ULL << 32)  // Receive messages
+#define CAP_IPC_SHMEM          (1ULL << 33)  // Shared memory access
 
-    // System Capabilities
-    CAP_SYS_ADMIN          = (1ULL << 50),  // System administration
-    CAP_SYS_MODULE         = (1ULL << 51),  // Load kernel modules/drivers
-    CAP_SYS_REBOOT         = (1ULL << 52),  // Reboot system
-    CAP_SYS_TIME           = (1ULL << 53),  // Set system time
-    CAP_SYS_CHROOT         = (1ULL << 54),  // Change root directory
-    CAP_SYS_RESOURCE       = (1ULL << 55),  // Override resource limits
+// Process Management Capabilities
+#define CAP_PROC_FORK          (1ULL << 40)  // Fork processes
+#define CAP_PROC_EXEC          (1ULL << 41)  // Execute programs
+#define CAP_PROC_KILL          (1ULL << 42)  // Kill other processes
+#define CAP_PROC_SETPRIORITY   (1ULL << 43)  // Change process priority
+#define CAP_PROC_PTRACE        (1ULL << 44)  // Debug/trace processes
 
-    // Security Capabilities
-    CAP_SEC_SETUID         = (1ULL << 60),  // Change user ID
-    CAP_SEC_SETGID         = (1ULL << 61),  // Change group ID
-    CAP_SEC_CAP_GRANT      = (1ULL << 62),  // Grant capabilities to others
-} capability_t;
+// System Capabilities
+#define CAP_SYS_ADMIN          (1ULL << 50)  // System administration
+#define CAP_SYS_MODULE         (1ULL << 51)  // Load kernel modules/drivers
+#define CAP_SYS_REBOOT         (1ULL << 52)  // Reboot system
+#define CAP_SYS_TIME           (1ULL << 53)  // Set system time
+#define CAP_SYS_CHROOT         (1ULL << 54)  // Change root directory
+#define CAP_SYS_RESOURCE       (1ULL << 55)  // Override resource limits
+
+// Security Capabilities
+#define CAP_SEC_SETUID         (1ULL << 60)  // Change user ID
+#define CAP_SEC_SETGID         (1ULL << 61)  // Change group ID
+#define CAP_SEC_CAP_GRANT      (1ULL << 62)  // Grant capabilities to others
 
 // Capability Set (64-bit mask)
 typedef uint64_t capset_t;

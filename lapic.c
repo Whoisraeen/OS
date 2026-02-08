@@ -75,9 +75,14 @@ void lapic_init(void) {
     // 10,000,000
     lapic_write(LAPIC_TIMER_INIT, 10000000);
     
-    // LVT Timer: Periodic (0x20000) | Vector 0x40 (64)
-    // Masked? No.
-    lapic_write(LAPIC_LVT_TIMER, 0x20040);
+    // LVT Timer: Periodic (0x20000) | Vector 32 (IRQ 0 mapping)
+    // We want to replace the PIT eventually, but for now let's use Vector 32
+    // to match the PIT logic or Scheduler logic?
+    // Scheduler uses PIT (IRQ 0 -> Vector 32).
+    // If we enable LAPIC Timer on Vector 32, we might conflict with PIT if both enabled.
+    // For now, let's MASK the LAPIC Timer (bit 16) to avoid issues until we are ready.
+    // 0x10000 = Masked
+    lapic_write(LAPIC_LVT_TIMER, 0x10020); 
     
     kprintf("[LAPIC] Initialized on CPU. Base: 0x%lx\n", lapic_base_addr);
 }

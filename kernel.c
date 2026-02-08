@@ -32,7 +32,7 @@ void test_task1(void) {
     int x = 0;
     int y = 500;
     for (;;) {
-        if (fb_ptr && x < fb_width && y < fb_height) {
+        if (fb_ptr && (uint64_t)x < fb_width && (uint64_t)y < fb_height) {
              // Draw Red Line moving right
              fb_ptr[y * fb_width + x] = 0xFFFF0000;
         }
@@ -53,7 +53,7 @@ void test_task2(void) {
     int x = 0;
     int y = 520;
     for (;;) {
-        if (fb_ptr && x < fb_width && y < fb_height) {
+        if (fb_ptr && (uint64_t)x < fb_width && (uint64_t)y < fb_height) {
              // Draw Green Line moving right
              fb_ptr[y * fb_width + x] = 0xFF00FF00;
         }
@@ -148,7 +148,7 @@ void _start(void) {
     for (size_t i = 0; i < fb_width * fb_height; i++) fb_ptr[i] = 0xFF00FFFF; // Cyan
 
     // Enable Interrupts
-    __asm__ volatile ("sti");
+    // __asm__ volatile ("sti"); // MOVED to after scheduler_init
 
     // Initialize PMM
     pmm_init();
@@ -166,10 +166,14 @@ void _start(void) {
     // Initialize Timer (PIT for scheduling)
     extern void timer_init(void);
     timer_init();
-
+    
     // Initialize Scheduler
     extern void scheduler_init(void);
     scheduler_init();
+
+    // Enable Interrupts (moved from earlier)
+    // We enable interrupts AFTER scheduler is ready to handle ticks!
+    __asm__ volatile ("sti");
 
     // Initialize IPC subsystem
     ipc_init();
@@ -177,29 +181,27 @@ void _start(void) {
     // Initialize security subsystem (capability-based)
     security_init();
 
+    // Initialize syscalls (MSRs)
+    extern void syscall_init(void);
+    syscall_init();
+
     // =====================================================================
     // TEST: Create test tasks to verify preemptive multitasking
     // =====================================================================
-    kprintf("\n[KERNEL] Creating test tasks for multitasking...\n");
+    // kprintf("\n[KERNEL] Creating test tasks for multitasking...\n");
+    // extern int task_create(const char *name, void (*entry)(void));
+    // task_create("test_task1", test_task1);
+    // task_create("test_task2", test_task2);
+    
+    // extern void scheduler_debug_print_tasks(void);
+    // scheduler_debug_print_tasks();
 
-    // Create the test tasks (functions defined at top of file)
-    extern int task_create(const char *name, void (*entry)(void));
-    task_create("test_task1", test_task1);
-    task_create("test_task2", test_task2);
-    // task_create("test_task3", test_task3); // Causes Exception 0 (Divide Error) likely due to unsaved FPU state?
+    // kprintf("\n[KERNEL] Multitasking should now be active!\n");
+    
+    // extern void timer_sleep(uint32_t ms);
+    // timer_sleep(1000); 
 
-    // Print task list to verify they were created
-    extern void scheduler_debug_print_tasks(void);
-    scheduler_debug_print_tasks();
-
-    kprintf("\n[KERNEL] Multitasking should now be active!\n");
-    kprintf("[KERNEL] You should see interleaved output from tasks 1, 2, and 3.\n\n");
-
-    // Let tasks run for a bit to verify scheduling works
-    extern void timer_sleep(uint32_t ms);
-    timer_sleep(5000);  // Let tasks run for 5 seconds
-
-    kprintf("\n[KERNEL] Multitasking test complete! Continuing with compositor...\n\n");
+    // kprintf("\n[KERNEL] Multitasking test complete! Continuing with compositor...\n\n");
     // =====================================================================
     
     // DEBUG: Clear to WHITE (Check 4: VMM Switch OK)
@@ -274,26 +276,7 @@ void _start(void) {
             console_printf("[KERNEL] init.elf not found in initrd!\n");
         }
         
-        // Launch Compositor
-        vfs_node_t *comp_node = initrd_find("compositor.elf");
-        if (comp_node) {
-            console_printf("[KERNEL] Found compositor.elf, loading...\n");
-            void *comp_data = kmalloc(comp_node->length);
-            if (comp_data) {
-                vfs_read(comp_node, 0, comp_node->length, (uint8_t*)comp_data);
-                
-                extern int task_create_user(const char *name, const void *elf_data, size_t size);
-                int pid = task_create_user("compositor", comp_data, comp_node->length);
-                if (pid >= 0) {
-                    console_printf("[KERNEL] Compositor process started (PID %d)\n", pid);
-                } else {
-                    console_printf("[KERNEL] Failed to start compositor process\n");
-                }
-                kfree(comp_data);
-            }
-        } else {
-            console_printf("[KERNEL] compositor.elf not found in initrd!\n");
-        }
+        // Compositor is now launched by init
 
     } else {
         console_printf(" Initrd: Not loaded (no module)\n");
@@ -303,16 +286,6 @@ void _start(void) {
     extern void mouse_init(void);
     mouse_init();
     
-    // Initialize Security and IPC
-    extern void security_init(void);
-    extern void ipc_init(void);
-    security_init();  // Must be first (defines capabilities)
-    ipc_init();       // Uses security checks
-
-    // Initialize syscalls (MSRs)
-    extern void syscall_init(void);
-    syscall_init();
-
     // Main Loop (Kernel Idle)
     for (;;) {
         __asm__ volatile("hlt");

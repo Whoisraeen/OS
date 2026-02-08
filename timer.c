@@ -23,6 +23,7 @@ void timer_init(void) {
     outb(PIT_CHANNEL0, (divisor >> 8) & 0xFF);
     
     // Enable IRQ0 on PIC (unmask)
+    // NOTE: This will cause interrupts to fire immediately if IF=1
     outb(0x21, inb(0x21) & 0xFE);
     
     kprintf("[TIMER] PIT initialized at %d Hz\n", TIMER_HZ);

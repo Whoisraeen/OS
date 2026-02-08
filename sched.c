@@ -136,12 +136,18 @@ int task_create(const char *name, void (*entry)(void)) {
     *--sp = 0; // err_code
     *--sp = 0; // int_no
     
-    *--sp = 0x10; // GS
-    *--sp = 0x10; // FS
-    *--sp = 0x10; // ES
-    *--sp = 0x10; // DS
+    // PUSH GPRs FIRST (Higher Addresses than Segments in ISR pop order)
+    // ISR Common Stub pops: Segments (GS,FS,ES,DS), THEN GPRs.
+    // So Stack (Low -> High) must be: Segments, GPRs, Int, Err, RIP...
+    // *--sp moves to Lower Address.
+    // So we push GPRs, THEN 4 Segments.
     
-    for(int i=0; i<15; i++) *--sp = 0; // GPRs
+    for(int i=0; i<15; i++) *--sp = 0; // GPRs (R15..RAX)
+    
+    *--sp = 0x10; // DS (popped first)
+    *--sp = 0x10; // ES
+    *--sp = 0x10; // FS  
+    *--sp = 0x10; // GS (popped last)
     
     tasks[slot].rsp = (uint64_t)sp;
     tasks[slot].id = slot;
@@ -213,17 +219,16 @@ int task_create_user(const char *name, const void *elf_data, size_t size) {
     uint64_t *sp = (uint64_t *)task->rsp;
     
     // Patch the frame created by task_create
-    // sp[15] is DS
-    sp[15] = 0x1B; // DS
-    sp[16] = 0x1B; // ES
-    sp[17] = 0x1B; // FS
-    sp[18] = 0x1B; // GS
+    // sp[0]=FS, sp[1]=ES, sp[2]=DS
+    sp[0] = 0x1B; // FS
+    sp[1] = 0x1B; // ES
+    sp[2] = 0x1B; // DS
     
-    sp[21] = entry_point;      // RIP
-    sp[22] = 0x23;             // CS (User Code)
-    sp[23] = 0x202;            // RFLAGS (IF=1)
-    sp[24] = user_stack_top;   // RSP (User Stack)
-    sp[25] = 0x1B;             // SS (User Data)
+    sp[20] = entry_point;      // RIP
+    sp[21] = 0x23;             // CS (User Code)
+    sp[22] = 0x202;            // RFLAGS (IF=1)
+    sp[23] = user_stack_top;   // RSP (User Stack)
+    sp[24] = 0x1B;             // SS (User Data)
     
     kprintf("[SCHED] Created User Task %d (%s) Entry=0x%lx\n", slot, name, entry_point);
     return slot;

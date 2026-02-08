@@ -91,18 +91,18 @@ static void draw_string(int x, int y, const char *str, uint32_t color) {
 // Draw mouse cursor (simple arrow)
 static void draw_cursor(int mx, int my) {
     static const uint8_t cursor[12] = {
-        0b11000000,
-        0b11100000,
-        0b11110000,
-        0b11111000,
-        0b11111100,
-        0b11111110,
-        0b11111111,
-        0b11111100,
-        0b11111100,
-        0b11001100,
-        0b00000110,
-        0b00000110,
+        0xC0,
+        0xE0,
+        0xF0,
+        0xF8,
+        0xFC,
+        0xFE,
+        0xFF,
+        0xFC,
+        0xFC,
+        0xCC,
+        0x06,
+        0x06,
     };
     
     for (int y = 0; y < 12; y++) {
