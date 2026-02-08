@@ -1,14 +1,16 @@
 #include "pmm.h"
 #include <stddef.h>
 
-// Request Memory Map from Limine
-static volatile struct limine_memmap_request memmap_request = {
+// Request Memory Map from Limine (exported for use by VMM)
+__attribute__((used, section(".requests")))
+volatile struct limine_memmap_request memmap_request = {
     .id = LIMINE_MEMMAP_REQUEST,
     .revision = 0
 };
 
 // Request HHDM (Higher Half Direct Map) offset from Limine
 // This tells us how to convert physical addresses to virtual addresses.
+__attribute__((used, section(".requests")))
 static volatile struct limine_hhdm_request hhdm_request = {
     .id = LIMINE_HHDM_REQUEST,
     .revision = 0
@@ -19,6 +21,7 @@ static uint64_t bitmap_phys = 0;        // Physical address of the bitmap
 static uint64_t highest_page = 0;
 static uint64_t bitmap_size = 0;
 static uint64_t hhdm_offset = 0;        // Limine's HHDM offset
+static uint64_t first_free_hint = 1;    // Hint: first possibly-free page (skip page 0)
 
 // Helper to convert physical address to virtual address
 static inline void *phys_to_virt(uint64_t phys) {
@@ -48,16 +51,10 @@ extern uint64_t fb_width;
 extern uint64_t fb_height;
 
 void pmm_init(void) {
-    // DEBUG: Entered pmm_init -> MAGENTA
-    if (fb_ptr) for (size_t i = 0; i < fb_width * fb_height; i++) fb_ptr[i] = 0xFFFF00FF;
-
     struct limine_memmap_response *memmap = memmap_request.response;
     struct limine_hhdm_response *hhdm = hhdm_request.response;
 
-    // CRITICAL: Check if Limine fulfilled our requests
     if (memmap == NULL || hhdm == NULL) {
-        // Limine didn't respond. Panic.
-        if (fb_ptr) for (size_t i = 0; i < fb_width * fb_height; i++) fb_ptr[i] = 0xFFAA00FF; // Purple
         for (;;) __asm__("hlt");
     }
 
@@ -84,9 +81,6 @@ void pmm_init(void) {
 
         if (entry->type == LIMINE_MEMMAP_USABLE) {
             if (entry->length >= bitmap_size) {
-                // DEBUG: Found candidate -> YELLOW
-                if (fb_ptr) for (size_t j = 0; j < fb_width * fb_height / 4; j++) fb_ptr[j] = 0xFFFFFF00;
-
                 // Store both physical and virtual addresses
                 bitmap_phys = entry->base;
                 bitmap = (uint8_t *)phys_to_virt(bitmap_phys);
@@ -102,8 +96,6 @@ void pmm_init(void) {
     }
 
     if (bitmap == NULL) {
-        // Panic: No memory for bitmap -> RED
-        if (fb_ptr) for (size_t i = 0; i < fb_width * fb_height; i++) fb_ptr[i] = 0xFFFF0000;
         for (;;) __asm__("hlt");
     }
 
@@ -134,11 +126,19 @@ void pmm_init(void) {
 }
 
 void *pmm_alloc_page(void) {
-    // Find first free bit
-    for (uint64_t i = 1; i < highest_page; i++) { // Skip page 0
+    // Start from hint instead of always scanning from 1
+    for (uint64_t i = first_free_hint; i < highest_page; i++) {
         if (!bitmap_test(i)) {
             bitmap_set(i);
-            // Return physical address (caller uses phys_to_virt if needed)
+            first_free_hint = i + 1; // Next search starts after this page
+            return (void *)(i * PAGE_SIZE);
+        }
+    }
+    // Wrap around: search from 1 to hint (in case pages were freed before hint)
+    for (uint64_t i = 1; i < first_free_hint && i < highest_page; i++) {
+        if (!bitmap_test(i)) {
+            bitmap_set(i);
+            first_free_hint = i + 1;
             return (void *)(i * PAGE_SIZE);
         }
     }
@@ -147,20 +147,38 @@ void *pmm_alloc_page(void) {
 
 void *pmm_alloc_pages(size_t count) {
     if (count == 0) return NULL;
-    
-    // Find contiguous range of free pages
-    uint64_t start = 1; // Skip page 0
+
+    // Find contiguous range of free pages, starting from hint
+    uint64_t start = first_free_hint;
     uint64_t found = 0;
-    
-    for (uint64_t i = 1; i < highest_page; i++) {
+
+    for (uint64_t i = first_free_hint; i < highest_page; i++) {
         if (!bitmap_test(i)) {
             if (found == 0) start = i;
             found++;
             if (found == count) {
-                // Success! Mark them as used and return
                 for (uint64_t j = 0; j < count; j++) {
                     bitmap_set(start + j);
                 }
+                first_free_hint = start + count;
+                return (void *)(start * PAGE_SIZE);
+            }
+        } else {
+            found = 0;
+        }
+    }
+
+    // Wrap around: search from 1 to hint
+    found = 0;
+    for (uint64_t i = 1; i < first_free_hint && i < highest_page; i++) {
+        if (!bitmap_test(i)) {
+            if (found == 0) start = i;
+            found++;
+            if (found == count) {
+                for (uint64_t j = 0; j < count; j++) {
+                    bitmap_set(start + j);
+                }
+                first_free_hint = start + count;
                 return (void *)(start * PAGE_SIZE);
             }
         } else {
@@ -174,4 +192,19 @@ void pmm_free_page(void *ptr) {
     uint64_t addr = (uint64_t)ptr;
     uint64_t page = addr / PAGE_SIZE;
     bitmap_unset(page);
+    // Update hint if this page is before current hint
+    if (page < first_free_hint) {
+        first_free_hint = page;
+    }
+}
+
+void pmm_free_pages(void *ptr, size_t count) {
+    uint64_t addr = (uint64_t)ptr;
+    uint64_t page = addr / PAGE_SIZE;
+    for (size_t i = 0; i < count; i++) {
+        bitmap_unset(page + i);
+    }
+    if (page < first_free_hint) {
+        first_free_hint = page;
+    }
 }

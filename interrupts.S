@@ -42,7 +42,7 @@ jump_to_usermode:
     mov es, ax
     mov fs, ax
     mov gs, ax
-    
+
     ; Stack frame for IRETQ
     push 0x1B           ; SS = User Data
     push rsi            ; RSP = User Stack
@@ -52,61 +52,64 @@ jump_to_usermode:
     push rax            ; RFLAGS
     push 0x23           ; CS = User Code (Index 4, RPL 3)
     push rdi            ; RIP = User Entry
-    
+
     swapgs              ; Swap GS to User GS
     iretq
 
 ; -----------------------------------------------------------------------------
 ; Syscall Entry Point (LSTAR points here)
 ; -----------------------------------------------------------------------------
+; cpu_t layout (must match cpu.h):
+;   offset 0:  self              (8 bytes) — get_cpu() reads this
+;   offset 8:  syscall_scratch   (8 bytes) — user RSP saved here
+;   offset 16: lapic_id          (4 bytes)
+;   offset 20: cpu_id            (4 bytes)
+;   offset 24: gdt[7]            (56 bytes)
+;   offset 80: tss               (104 bytes, packed)
+;   offset 84: tss.rsp0          (8 bytes) — kernel stack pointer
+; -----------------------------------------------------------------------------
 section .text
 
 syscall_entry:
     swapgs              ; Swap GS to Kernel GS (cpu_t)
-    
-    ; Save User RSP to scratch space (first 8 bytes of cpu_t)
-    mov gs:[0], rsp
-    
-    ; Load Kernel RSP from TSS RSP0
-    ; cpu_t layout:
-    ;   0: syscall_scratch (8)
-    ;   8: lapic_id (4), cpu_id (4)
-    ;  16: gdt (56)
-    ;  72: tss (start)
-    ;  76: tss.rsp0 (offset 4 in tss)
-    mov rsp, gs:[76]
-    
+
+    ; Save User RSP to syscall_scratch (offset 8 in cpu_t)
+    mov gs:[8], rsp
+
+    ; Load Kernel RSP from TSS RSP0 (offset 84 in cpu_t)
+    mov rsp, gs:[84]
+
     ; Save User RFLAGS and RIP (RCX/R11 are clobbered by sysret, but we need to preserve them)
     push r11    ; Save User RFLAGS
     push rcx    ; Save User RIP
-    
+
     ; Switch to Kernel Segments
     mov ax, 0x10
     mov ds, ax
     mov es, ax
     ; SS is already Kernel (handled by CPU)
-    
+
     ; Remap arguments for C function
     mov rcx, rdx    ; 4th arg = User Arg3
     mov rdx, rsi    ; 3rd arg = User Arg2
     mov rsi, rdi    ; 2nd arg = User Arg1
     mov rdi, rax    ; 1st arg = Syscall Number
-    
+
     call syscall_handler
-    
+
     ; Restore User Segments
     mov dx, 0x1B
     mov ds, dx
     mov es, dx
-    
+
     pop rcx     ; Restore User RIP
     pop r11     ; Restore User RFLAGS
-    
-    ; Restore User Stack
-    mov rsp, gs:[0]
-    
+
+    ; Restore User Stack from syscall_scratch (offset 8 in cpu_t)
+    mov rsp, gs:[8]
+
     swapgs      ; Swap back to User GS
-    
+
     sysretq
 
 ; -----------------------------------------------------------------------------
@@ -171,14 +174,16 @@ ISR_NOERRCODE 31
 %endrep
 
 isr_common_stub:
-    ; Stack: [Err] [Int] [RIP] [CS] ...
+    ; Stack layout at this point:
+    ;   [rsp+0]  = int_no  (pushed by ISR macro)
+    ;   [rsp+8]  = err_code (pushed by ISR macro or CPU)
+    ;   [rsp+16] = RIP     (pushed by CPU)
+    ;   [rsp+24] = CS      (pushed by CPU)
+    ;   [rsp+32] = RFLAGS  (pushed by CPU)
+    ;   [rsp+40] = RSP     (pushed by CPU, if privilege change)
+    ;   [rsp+48] = SS      (pushed by CPU, if privilege change)
+
     ; Check if we came from User Mode (CS & 3 == 3)
-    ; CS is at RSP + 24 (since we pushed Err and Int = 16 bytes, plus return address? No, jmp doesn't push)
-    ; Wait, `push 0`, `push %1`, `jmp`.
-    ; Stack: [Err] [Int] [RIP] [CS]
-    ; RSP points to Err.
-    ; CS is at RSP + 8 (Err) + 8 (Int) + 8 (RIP) = RSP + 24.
-    
     cmp word [rsp + 24], 0x08   ; Check CS == Kernel Code
     je .entry_kernel
     swapgs                      ; Came from User, swap GS
@@ -208,25 +213,31 @@ isr_common_stub:
     push rax
     mov ax, fs
     push rax
-    
+
     ; Load kernel data segment
     mov ax, 0x10
     mov ds, ax
     mov es, ax
     mov fs, ax
     ; GS points to cpu_t via MSR (because we swapgs'd if needed)
-    
+
+    ; Call C handler — returns new RSP (for context switch) or same RSP
     mov rdi, rsp
     call isr_handler
-    
-    ; Restore segment registers
+
+    ; isr_handler returns new RSP in RAX.
+    ; For non-switching interrupts, RAX == old RSP (no-op).
+    ; For timer/yield, RAX may point to a different task's saved registers.
+    mov rsp, rax
+
+    ; Restore segment registers (from potentially new task's stack)
     pop rax
     mov fs, ax
     pop rax
     mov es, ax
     pop rax
     mov ds, ax
-    
+
     ; Restore general purpose registers
     pop r15
     pop r14
@@ -243,9 +254,9 @@ isr_common_stub:
     pop rcx
     pop rbx
     pop rax
-    
-    ; Check if returning to User Mode
-    ; Stack: [Err] [Int] [RIP] [CS]
+
+    ; Check if returning to User Mode (may be a DIFFERENT task than entry!)
+    ; Stack: [int_no] [err_code] [RIP] [CS] ...
     cmp word [rsp + 24], 0x08
     je .exit_kernel
     swapgs                      ; Returning to User, swap GS
@@ -253,7 +264,7 @@ isr_common_stub:
 
     ; Remove error code and interrupt number
     add rsp, 16
-    
+
     iretq
 
 global isr_stub_table

@@ -1,6 +1,9 @@
 #include "idt.h"
 #include "pic.h"
 #include "serial.h"
+#include "sched.h"
+#include "timer.h"
+#include "cpu.h"
 #include <stddef.h>
 
 struct idt_entry idt[256];
@@ -12,6 +15,17 @@ extern void *isr_stub_table[];
 // External Keyboard Handler (from keyboard.c)
 extern void keyboard_handler(struct interrupt_frame *frame);
 
+// External Mouse Handler (from mouse.c)
+extern void mouse_handler(void);
+
+// Debugging globals
+extern uint32_t *fb_ptr;
+extern uint64_t fb_width;
+extern uint64_t fb_height;
+
+// Syscall handler
+extern uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3);
+
 void idt_set_gate(uint8_t num, uint64_t base, uint16_t sel, uint8_t flags) {
     idt[num].offset_low    = (base & 0xFFFF);
     idt[num].offset_middle = (base >> 16) & 0xFFFF;
@@ -22,68 +36,125 @@ void idt_set_gate(uint8_t num, uint64_t base, uint16_t sel, uint8_t flags) {
     idt[num].zero          = 0;
 }
 
-// Debugging globals
-extern uint32_t *fb_ptr;
-extern uint64_t fb_width;
-extern uint64_t fb_height;
+// Exception names for debugging
+static const char *exception_names[] = {
+    "Division Error", "Debug", "NMI", "Breakpoint",
+    "Overflow", "Bound Range", "Invalid Opcode", "Device Not Available",
+    "Double Fault", "Coprocessor Segment", "Invalid TSS", "Segment Not Present",
+    "Stack-Segment Fault", "General Protection Fault", "Page Fault", "Reserved",
+    "x87 FP Exception", "Alignment Check", "Machine Check", "SIMD FP Exception",
+    "Virtualization", "Control Protection", "Reserved", "Reserved",
+    "Reserved", "Reserved", "Reserved", "Reserved",
+    "Hypervisor Injection", "VMM Communication", "Security Exception", "Reserved"
+};
 
-// Syscall handler
-extern uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3);
+uint64_t isr_handler(struct interrupt_frame *frame) {
+    // ---- Timer IRQ (Vector 32) — Preemptive scheduling ----
+    if (frame->int_no == 32) {
+        timer_tick();
+        pic_send_eoi(0); // EOI before context switch
 
-void isr_handler(struct interrupt_frame *frame) {
-    // Syscall (int 0x80 = vector 128)
-    if (frame->int_no == 128) {
-        // Syscall convention: rax=syscall#, rdi=arg1, rsi=arg2, rdx=arg3
-        // Return value goes in rax
-        frame->rax = syscall_handler(frame->rax, frame->rdi, frame->rsi, frame->rdx);
-        return;
+        // Call scheduler — may return a different task's RSP
+        uint64_t new_rsp = scheduler_switch((registers_t *)frame);
+        return new_rsp;
     }
-    
-    // Exceptions (0-31)
-    if (frame->int_no < 32) {
-        // Print exception info to serial for debugging
-        extern void kprintf(const char *fmt, ...);
-        kprintf("\n*** EXCEPTION %lu ***\n", frame->int_no);
-        kprintf("Error code: 0x%lx\n", frame->err_code);
-        kprintf("RIP: 0x%lx\n", frame->rip);
-        kprintf("CS:  0x%lx\n", frame->cs);
-        kprintf("RSP: 0x%lx\n", frame->rsp);
-        kprintf("SS:  0x%lx\n", frame->ss);
-        
-        // EXCEPTION! TURN SCREEN RED
-        if (fb_ptr) {
-            for (size_t i = 0; i < fb_width * fb_height; i++) {
-                fb_ptr[i] = 0xFFFF0000; // Red
-            }
+
+    // ---- Yield interrupt (Vector 0x40) — Voluntary context switch ----
+    if (frame->int_no == YIELD_VECTOR) {
+        uint64_t new_rsp = scheduler_switch((registers_t *)frame);
+        return new_rsp;
+    }
+
+    // ---- Syscall (int 0x80 = Vector 128) ----
+    if (frame->int_no == 128) {
+        frame->rax = syscall_handler(frame->rax, frame->rdi, frame->rsi, frame->rdx);
+        return (uint64_t)frame;
+    }
+
+    // ---- Page Fault (Vector 14) ----
+    if (frame->int_no == 14) {
+        uint64_t faulting_addr;
+        __asm__ volatile("mov %%cr2, %0" : "=r"(faulting_addr));
+
+        kprintf("\n*** PAGE FAULT ***\n");
+        kprintf("Address: 0x%lx\n", faulting_addr);
+        kprintf("Error:   0x%lx (", frame->err_code);
+        if (frame->err_code & 1) kprintf("present ");
+        if (frame->err_code & 2) kprintf("write ");
+        else kprintf("read ");
+        if (frame->err_code & 4) kprintf("user ");
+        else kprintf("kernel ");
+        if (frame->err_code & 8) kprintf("reserved-write ");
+        if (frame->err_code & 16) kprintf("instruction-fetch ");
+        kprintf(")\n");
+        kprintf("RIP: 0x%lx  CS: 0x%lx\n", frame->rip, frame->cs);
+        kprintf("RSP: 0x%lx  SS: 0x%lx\n", frame->rsp, frame->ss);
+
+        // User-mode page fault: terminate the task
+        if (frame->cs & 3) {
+            kprintf("[PAGE FAULT] User process fault — terminating task %u\n",
+                    task_current_id());
+            task_exit();
+            // task_exit yields via int 0x40, which re-enters isr_handler
+            // and calls scheduler_switch. If we get here, just return.
+            return (uint64_t)frame;
         }
-        // Halt
+
+        // Kernel page fault: unrecoverable, panic
+        kprintf("[PAGE FAULT] KERNEL PANIC — halting\n");
+        kprintf("RAX=0x%lx RBX=0x%lx RCX=0x%lx RDX=0x%lx\n",
+                frame->rax, frame->rbx, frame->rcx, frame->rdx);
+        kprintf("RSI=0x%lx RDI=0x%lx RBP=0x%lx\n",
+                frame->rsi, frame->rdi, frame->rbp);
+        if (fb_ptr) {
+            for (size_t i = 0; i < fb_width * fb_height; i++)
+                fb_ptr[i] = 0xFFFF0000;
+        }
         for (;;) __asm__("hlt");
     }
 
-    // NOTE: IRQ 0 (Timer, Vector 32) is now handled entirely in assembly
-    // with context switching. Do not handle it here.
+    // ---- Other exceptions (0-31, except 14 handled above) ----
+    if (frame->int_no < 32) {
+        const char *name = (frame->int_no < 32) ? exception_names[frame->int_no] : "Unknown";
+        kprintf("\n*** EXCEPTION %lu: %s ***\n", frame->int_no, name);
+        kprintf("Error code: 0x%lx\n", frame->err_code);
+        kprintf("RIP: 0x%lx  CS: 0x%lx\n", frame->rip, frame->cs);
+        kprintf("RSP: 0x%lx  SS: 0x%lx\n", frame->rsp, frame->ss);
+        kprintf("RAX=0x%lx RBX=0x%lx RCX=0x%lx RDX=0x%lx\n",
+                frame->rax, frame->rbx, frame->rcx, frame->rdx);
 
-    // IRQ 1 is mapped to Vector 33 (32 + 1)
+        // User-mode exception: terminate the task
+        if (frame->cs & 3) {
+            kprintf("[EXCEPTION] User process fault — terminating task %u\n",
+                    task_current_id());
+            task_exit();
+            return (uint64_t)frame;
+        }
+
+        // Kernel exception: panic
+        if (fb_ptr) {
+            for (size_t i = 0; i < fb_width * fb_height; i++)
+                fb_ptr[i] = 0xFFFF0000;
+        }
+        for (;;) __asm__("hlt");
+    }
+
+    // ---- IRQ 1 (Keyboard, Vector 33) ----
     if (frame->int_no == 33) {
         keyboard_handler(frame);
     }
 
-    // IRQ 12 is mapped to Vector 44 (Mouse)
+    // ---- IRQ 12 (Mouse, Vector 44) ----
     if (frame->int_no == 44) {
-        static int irq12_count = 0;
-        irq12_count++;
-        if (irq12_count <= 5) {
-            kprintf("[IDT] IRQ12 received! count=%d\n", irq12_count);
-        }
-        extern void mouse_handler(void);
         mouse_handler();
     }
 
-    // Send EOI for all IRQs (vectors 32-47)
-    // Timer (32) sends its own EOI in assembly, but this won't hurt
-    if (frame->int_no >= 32 && frame->int_no <= 47) {
+    // ---- Send EOI for IRQs (vectors 33-47, timer already handled above) ----
+    if (frame->int_no >= 33 && frame->int_no <= 47) {
         pic_send_eoi(frame->int_no - 32);
     }
+
+    return (uint64_t)frame; // No context switch for regular interrupts
 }
 
 
@@ -96,14 +167,14 @@ void idt_init(void) {
         // 0x8E = Present, Ring 0, Interrupt Gate
         idt_set_gate(i, (uint64_t)isr_stub_table[i], 0x08, 0x8E);
     }
-    
+
     // Syscall gate (vector 128 = 0x80) must be DPL=3 so Ring 3 can call it
     // 0xEE = Present, Ring 3, Interrupt Gate
     idt_set_gate(128, (uint64_t)isr_stub_table[128], 0x08, 0xEE);
 
+    // Yield gate (vector 0x40) — DPL=3 so user processes can yield via int 0x40
+    idt_set_gate(YIELD_VECTOR, (uint64_t)isr_stub_table[YIELD_VECTOR], 0x08, 0xEE);
+
     // Load IDT
     __asm__ volatile ("lidt %0" : : "m"(idtp));
-    
-    // Enable interrupts? Not yet. we don't handle them properly.
-    // __asm__ volatile ("sti"); 
 }

@@ -7,6 +7,10 @@
 #define MAX_TASKS 32
 #define TASK_STACK_SIZE (16 * 1024)
 
+// User-space memory layout constants
+#define USER_STACK_TOP   0x7FFFFFFFF000ULL
+#define USER_STACK_SIZE  (16 * 1024)
+
 // CPU Registration State (what is pushed by ISR)
 // Note: This must match the stack layout in interrupts.S
 typedef struct {
@@ -29,17 +33,17 @@ typedef struct task_t {
     uint32_t id;
     char name[32];
     task_state_t state;
-    
+
     uint64_t rsp;        // Kernel stack pointer (saved context)
     void *stack_base;    // Base of allocated kernel stack
-    uint64_t cr3;        // Page table (for future process isolation)
-    
+    uint64_t cr3;        // Page table (0 = use kernel CR3)
+
     // Wakeup time for sleeping tasks
     uint64_t wakeup_ticks;
 
     // Linked List for Run Queue
     struct task_t *next;
-    
+
     // CPU Affinity (which CPU this task belongs to)
     uint32_t cpu_id;
 } task_t;
@@ -54,5 +58,8 @@ uint32_t task_current_id(void);
 
 // Called by Timer ISR (returns new RSP)
 uint64_t scheduler_switch(registers_t *regs);
+
+// Debug
+void scheduler_debug_print_tasks(void);
 
 #endif

@@ -148,21 +148,31 @@ void kfree(void *ptr) {
     
     header->is_free = true;
     used_heap_size -= (header->size + HEADER_SIZE);
-    
-    // Simple Coalescing: Check next block
-    // Only works if next block is physically/virtually adjacent and in the list
-    // Our list is not sorted, but 'next' pointer might point to adjacent block if it was split
+
+    // Forward coalescing: merge with next block if adjacent and free
     if (header->next && header->next->is_free) {
-        // Check if they are adjacent in memory
         if ((uint8_t*)header + HEADER_SIZE + header->size == (uint8_t*)header->next) {
-            // Merge
             block_header_t *next = header->next;
             header->size += HEADER_SIZE + next->size;
             header->next = next->next;
-            // 'next' is now gone
         }
     }
-    
+
+    // Backward coalescing: find a free block that ends right before 'header'
+    block_header_t *prev = head;
+    while (prev) {
+        if (prev != header && prev->is_free && prev->magic == HEAP_MAGIC) {
+            if ((uint8_t*)prev + HEADER_SIZE + prev->size == (uint8_t*)header) {
+                // prev is adjacent before header — merge header into prev
+                prev->size += HEADER_SIZE + header->size;
+                prev->next = header->next;
+                // header is now absorbed into prev
+                break;
+            }
+        }
+        prev = prev->next;
+    }
+
     spinlock_release(&heap_lock);
 }
 

@@ -13,7 +13,11 @@
       "Bash(wsl.exe -- bash -c \"cd /mnt/r/Projects/OS && which make gcc ld nasm\")",
       "Bash(wsl.exe -- bash -c:*)",
       "Bash(wsl.exe -- timeout:*)",
-      "Bash(wsl bash -c 'cd /mnt/r/Projects/OS && qemu-system-x86_64 -cdrom myos.iso -M q35 -serial stdio -display none 2>&1 &  QEMU_PID=$!; sleep 8; kill $QEMU_PID 2>/dev/null')"
+      "Bash(wsl bash -c 'cd /mnt/r/Projects/OS && qemu-system-x86_64 -cdrom myos.iso -M q35 -serial stdio -display none 2>&1 &  QEMU_PID=$!; sleep 8; kill $QEMU_PID 2>/dev/null')",
+      "Bash(wsl -- bash:*)",
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)"
     ]
   }
 }

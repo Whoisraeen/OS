@@ -21,6 +21,7 @@ struct idt_ptr {
 } __attribute__((packed));
 
 // Interrupt Frame (pushed by CPU/ISR stub)
+// Layout must match the push order in isr_common_stub (interrupts.S)
 struct interrupt_frame {
     uint64_t fs, es, ds;
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
@@ -29,7 +30,15 @@ struct interrupt_frame {
     uint64_t rip, cs, rflags, rsp, ss;
 } __attribute__((packed));
 
+// Yield software interrupt vector
+#define YIELD_VECTOR 0x40
+
 // Initialize IDT
 void idt_init(void);
+
+// ISR handler — returns new RSP for context switching
+// For non-switching interrupts, returns (uint64_t)frame (no-op)
+// For timer/yield, may return a different task's saved RSP
+uint64_t isr_handler(struct interrupt_frame *frame);
 
 #endif

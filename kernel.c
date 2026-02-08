@@ -1,9 +1,6 @@
 #include <stdint.h>
 #include <stddef.h>
-#include <stdint.h>
-#include <stddef.h>
 #include "limine/limine.h"
-#include "gdt.h"
 #include "gdt.h"
 #include "idt.h"
 #include "pic.h"
@@ -19,6 +16,10 @@
 #include "security.h"
 #include "cpu.h"
 #include "heap.h"
+#include "sched.h"
+#include "timer.h"
+#include "syscall.h"
+#include "mouse.h"
 
 // Globals for drivers to access
 uint32_t *fb_ptr = NULL;
@@ -122,57 +123,44 @@ void _start(void) {
     fb_width = framebuffer->width;
     fb_height = framebuffer->height;
 
-    // DEBUG: Clear to BLUE immediately (Check 1: Bootloader passed control)
-    for (size_t i = 0; i < fb_width * fb_height; i++) fb_ptr[i] = 0xFF0000FF; // Blue
-
     // Initialize GDT
     gdt_init();
-    
+
     // Initialize Serial (for debug output)
     serial_init();
     kprintf("\n[KERNEL] GDT initialized.\n");
-    
-    // DEBUG: Clear to GREEN (Check 2: GDT OK)
-    for (size_t i = 0; i < fb_width * fb_height; i++) fb_ptr[i] = 0xFF00FF00; // Green
 
     // Initialize IDT
     idt_init();
-    
+
     // Remap PIC
     pic_remap(32, 40);
 
     // Initialize Keyboard
     keyboard_init();
-    
-    // DEBUG: Clear to CYAN (Check 3: Interrupts Setup OK)
-    for (size_t i = 0; i < fb_width * fb_height; i++) fb_ptr[i] = 0xFF00FFFF; // Cyan
-
-    // Enable Interrupts
-    // __asm__ volatile ("sti"); // MOVED to after scheduler_init
 
     // Initialize PMM
     pmm_init();
-    
+
     // Initialize VMM (create our page tables)
     vmm_init();
-    
+
     // Switch to our page tables
     vmm_switch();
 
+    // Initialize Heap (needs PMM + VMM)
+    heap_init();
+
     // Initialize SMP (Detect and wake up other cores)
-    extern void smp_init(void);
     smp_init();
-    
+
     // Initialize Timer (PIT for scheduling)
-    extern void timer_init(void);
     timer_init();
-    
+
     // Initialize Scheduler
-    extern void scheduler_init(void);
     scheduler_init();
 
-    // Enable Interrupts (moved from earlier)
-    // We enable interrupts AFTER scheduler is ready to handle ticks!
+    // Enable Interrupts AFTER scheduler is ready to handle ticks
     __asm__ volatile ("sti");
 
     // Initialize IPC subsystem
@@ -182,32 +170,9 @@ void _start(void) {
     security_init();
 
     // Initialize syscalls (MSRs)
-    extern void syscall_init(void);
     syscall_init();
 
-    // =====================================================================
-    // TEST: Create test tasks to verify preemptive multitasking
-    // =====================================================================
-    // kprintf("\n[KERNEL] Creating test tasks for multitasking...\n");
-    // extern int task_create(const char *name, void (*entry)(void));
-    // task_create("test_task1", test_task1);
-    // task_create("test_task2", test_task2);
-    
-    // extern void scheduler_debug_print_tasks(void);
-    // scheduler_debug_print_tasks();
-
-    // kprintf("\n[KERNEL] Multitasking should now be active!\n");
-    
-    // extern void timer_sleep(uint32_t ms);
-    // timer_sleep(1000); 
-
-    // kprintf("\n[KERNEL] Multitasking test complete! Continuing with compositor...\n\n");
-    // =====================================================================
-    
-    // DEBUG: Clear to WHITE (Check 4: VMM Switch OK)
-    for (size_t i = 0; i < fb_width * fb_height; i++) fb_ptr[i] = 0xFFFFFFFF; // White
-
-    // Draw the "Sony Blue" background for the final state
+    // Draw the "Sony Blue" background
     for (size_t i = 0; i < fb_width * fb_height; i++) {
         fb_ptr[i] = 0xFF003366; 
     }
@@ -263,7 +228,6 @@ void _start(void) {
             if (init_data) {
                 vfs_read(init_node, 0, init_node->length, (uint8_t*)init_data);
                 
-                extern int task_create_user(const char *name, const void *elf_data, size_t size);
                 int pid = task_create_user("init", init_data, init_node->length);
                 if (pid >= 0) {
                     console_printf("[KERNEL] Init process started (PID %d)\n", pid);
@@ -283,7 +247,6 @@ void _start(void) {
     }
     
     // Initialize mouse
-    extern void mouse_init(void);
     mouse_init();
     
     // Main Loop (Kernel Idle)

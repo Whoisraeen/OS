@@ -15,34 +15,54 @@ struct task_t;
 #define MAX_CPUS 32
 
 // Per-CPU Data Structure
-    // This structure holds all information specific to a single core
-    typedef struct {
-        uint64_t syscall_scratch; // Scratch space for syscall handler (RSP saving)
-        uint32_t lapic_id;      // Local APIC ID
-        uint32_t cpu_id;        // Our sequential CPU ID (0, 1, 2...)
-    
+// IMPORTANT: Field order matters! Assembly in interrupts.S uses hardcoded
+// GS-relative offsets. If you reorder fields, update the offsets below AND
+// in syscall_entry (interrupts.S).
+//
+// Offset map (all packed structs, no padding between first 5 fields):
+//   0:  self              (8 bytes)  — get_cpu() reads gs:[0]
+//   8:  syscall_scratch   (8 bytes)  — syscall_entry uses gs:[8]
+//  16:  lapic_id          (4 bytes)
+//  20:  cpu_id            (4 bytes)
+//  24:  gdt[7]            (56 bytes)
+//  80:  tss               (104 bytes, packed)
+//  84:  tss.rsp0          — syscall_entry uses gs:[84]
+typedef struct {
+    // MUST be at offset 0: get_cpu() reads gs:[0] to get self pointer
+    uint64_t self;
+
+    // MUST be at offset 8: syscall_entry saves/restores user RSP here
+    uint64_t syscall_scratch;
+
+    uint32_t lapic_id;      // Local APIC ID
+    uint32_t cpu_id;        // Our sequential CPU ID (0, 1, 2...)
+
     // Per-CPU GDT and TSS
-    struct gdt_entry gdt[7]; // Kernel Code, Kernel Data, User Data, User Code, TSS
+    struct gdt_entry gdt[7];
     struct tss tss;
-    
+
     // Pointer to current running task on this CPU
-    void *current_task; // (struct task_t *)
-    
+    void *current_task;
+
     // Scheduler Run Queue (Linked List)
     struct task_t *run_queue_head;
     struct task_t *run_queue_tail;
-    
+
     // Per-CPU Scheduler Lock
     spinlock_t lock;
-    
+
     // Idle Task (fallback when queue is empty)
-    void *idle_task; 
-    
-    // Helper to store GS base
-    uint64_t self;          // Points to this structure
+    void *idle_task;
 } cpu_t;
 
+// Compile-time offset verification for assembly compatibility
+_Static_assert(__builtin_offsetof(cpu_t, self) == 0,
+    "cpu_t.self must be at offset 0 for get_cpu()");
+_Static_assert(__builtin_offsetof(cpu_t, syscall_scratch) == 8,
+    "cpu_t.syscall_scratch must be at offset 8 for syscall_entry");
+
 // Get current CPU structure (using GS segment)
+// GS_BASE points to cpu_t, and self (at offset 0) points back to itself
 static inline cpu_t *get_cpu(void) {
     cpu_t *cpu;
     __asm__ volatile("mov %%gs:0, %0" : "=r"(cpu));
