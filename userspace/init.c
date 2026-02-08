@@ -4,6 +4,7 @@
 #include "gui.h"
 #include "syscalls.h"
 #include "u_stdlib.h"
+#include "keymap.h"
 
 // IPC Message Structure
 typedef struct {
@@ -125,6 +126,9 @@ void _start(void) {
                 int kbd_len = 0;
                 memset(kbd_buffer, 0, 64);
                 
+                // Keyboard State
+                int shift_pressed = 0;
+                
                 while (running) {
                     long res = syscall3(SYS_IPC_RECV, my_port, (long)&msg, IPC_RECV_NONBLOCK);
                     if (res == 0) {
@@ -154,21 +158,33 @@ void _start(void) {
                                 draw_string(buffer, win_w, 10, 70, "Type: ", 0xFF000000);
                                 draw_string(buffer, win_w, 58, 70, kbd_buffer, 0xFF000000);
                             } else if (evt->type == EVENT_KEY_DOWN) {
-                                char c = (char)evt->code;
-                                if (c >= 32 && c <= 126 && kbd_len < 63) {
-                                    kbd_buffer[kbd_len++] = c;
-                                    kbd_buffer[kbd_len] = 0;
-                                } else if (c == '\b' && kbd_len > 0) { // Backspace
-                                    kbd_len--;
-                                    kbd_buffer[kbd_len] = 0;
-                                }
+                                uint32_t scancode = evt->code;
                                 
-                                // Redraw
-                                for (int i = 0; i < win_w * win_h; i++) buffer[i] = 0xFFCCCCCC;
-                                draw_string(buffer, win_w, 10, 10, "Init Process", 0xFF000000);
-                                draw_string(buffer, win_w, 10, 30, "Status: Typing...", text_color);
-                                draw_string(buffer, win_w, 10, 70, "Type: ", 0xFF000000);
-                                draw_string(buffer, win_w, 58, 70, kbd_buffer, 0xFF000000);
+                                // Handle Shift
+                                if (scancode == 0x2A || scancode == 0x36) { shift_pressed = 1; continue; }
+                                if (scancode == 0xAA || scancode == 0xB6) { shift_pressed = 0; continue; }
+                                
+                                if (scancode & 0x80) {
+                                    // Release
+                                } else {
+                                    // Press
+                                    char c = shift_pressed ? kbdus_upper[scancode] : kbdus_lower[scancode];
+                                    
+                                    if (c >= 32 && c <= 126 && kbd_len < 63) {
+                                        kbd_buffer[kbd_len++] = c;
+                                        kbd_buffer[kbd_len] = 0;
+                                    } else if (c == '\b' && kbd_len > 0) { // Backspace
+                                        kbd_len--;
+                                        kbd_buffer[kbd_len] = 0;
+                                    }
+                                    
+                                    // Redraw
+                                    for (int i = 0; i < win_w * win_h; i++) buffer[i] = 0xFFCCCCCC;
+                                    draw_string(buffer, win_w, 10, 10, "Init Process", 0xFF000000);
+                                    draw_string(buffer, win_w, 10, 30, "Status: Typing...", text_color);
+                                    draw_string(buffer, win_w, 10, 70, "Type: ", 0xFF000000);
+                                    draw_string(buffer, win_w, 58, 70, kbd_buffer, 0xFF000000);
+                                }
                             }
                         }
                     }

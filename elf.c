@@ -122,7 +122,6 @@ uint64_t elf_load_user(const void *data, size_t size) {
         
         if (phdr->p_type != PT_LOAD) continue;
         
-        // Allocate pages
         uint64_t vaddr = phdr->p_vaddr;
         uint64_t memsz = phdr->p_memsz;
         uint64_t filesz = phdr->p_filesz;
@@ -131,20 +130,51 @@ uint64_t elf_load_user(const void *data, size_t size) {
         uint64_t start_page = vaddr & ~0xFFF;
         uint64_t end_page = (vaddr + memsz + 4095) & ~0xFFF;
         
+        // Allocate and map pages, copying data as we go
         for (uint64_t page = start_page; page < end_page; page += 4096) {
+            // Allocate physical page
             uint64_t phys = (uint64_t)pmm_alloc_page();
-            // Map with USER | RW | PRESENT (0x07)
-            vmm_map_page(page, phys, 0x07);
+            if (!phys) {
+                kprintf("[ELF] Failed to allocate page for vaddr=0x%lx\n", page);
+                return 0;
+            }
             
             // Zero the page via HHDM
             void *kptr = (void*)(phys + vmm_get_hhdm_offset());
             mem_set(kptr, 0, 4096);
+            
+            // Calculate which part of the file to copy to this page
+            if (page >= vaddr && page < (vaddr + filesz)) {
+                // This page contains file data
+                uint64_t page_offset = 0;
+                uint64_t file_offset_for_page = offset;
+                
+                if (page == start_page) {
+                    // First page: might start mid-page
+                    page_offset = vaddr & 0xFFF;
+                    file_offset_for_page = offset;
+                } else {
+                    // Subsequent pages: calculate offset into file
+                    file_offset_for_page = offset + (page - vaddr);
+                }
+                
+                // How much to copy?
+                uint64_t bytes_to_copy = 4096 - page_offset;
+                uint64_t bytes_remaining_in_file = offset + filesz - file_offset_for_page;
+                if (bytes_to_copy > bytes_remaining_in_file) {
+                    bytes_to_copy = bytes_remaining_in_file;
+                }
+                
+                if (bytes_to_copy > 0 && file_offset_for_page < size) {
+                    mem_copy((uint8_t*)kptr + page_offset, 
+                             file_data + file_offset_for_page, 
+                             bytes_to_copy);
+                }
+            }
+            
+            // Map page to user virtual address with USER | RW | PRESENT (0x07)
+            vmm_map_page(page, phys, 0x07);
         }
-        
-        // Copy data to user virtual address (we are in the user CR3 context)
-        // Note: Kernel can access user pages if SMAP is disabled or stac/clac is used.
-        // We assume standard x86_64 behavior where Ring 0 can access Ring 3 pages.
-        mem_copy((void*)vaddr, file_data + offset, filesz);
     }
     
     return hdr->e_entry;

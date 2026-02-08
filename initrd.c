@@ -147,7 +147,13 @@ vfs_node_t *initrd_init(void *initrd_start, size_t initrd_size) {
         if (header->typeflag == '0' || header->typeflag == '\0') {
             vfs_node_t *file = &initrd_files[initrd_file_count];
             
-            str_copy(file->name, header->name, 128);
+            // Clean up name: remove "./" prefix if present
+            const char *clean_name = header->name;
+            if (clean_name[0] == '.' && clean_name[1] == '/') {
+                clean_name += 2;
+            }
+            
+            str_copy(file->name, clean_name, 128);
             file->flags = VFS_FILE;
             file->length = size;
             file->inode = initrd_file_count + 1;
