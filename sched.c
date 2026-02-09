@@ -9,7 +9,14 @@
 #include "vmm.h"
 #include "security.h"
 #include "gdt.h"
+#include "fd.h"
+#include "io.h"
+#include "vm_area.h"
+#include "elf.h"
+#include "string.h"
 #include <stdbool.h>
+
+#define MSR_FS_BASE 0xC0000100
 
 static task_t tasks[MAX_TASKS];
 static spinlock_t tasks_alloc_lock = {0}; // Lock for allocating from 'tasks' array
@@ -71,6 +78,13 @@ void scheduler_init(void) {
     for(int i=0; n[i]; i++) tasks[0].name[i] = n[i];
     tasks[0].name[11] = 0;
     tasks[0].cr3 = 0; // Use current CR3 (kernel)
+    tasks[0].fd_table = NULL; // Kernel task has no fd table
+    tasks[0].mm = NULL;       // Kernel task has no mm
+    tasks[0].parent_pid = 0;
+    tasks[0].exit_code = 0;
+    tasks[0].tgid = 0;
+    tasks[0].tls_base = 0;
+    tasks[0].pending_signals = 0;
     tasks[0].cpu_id = 0;
 
     num_tasks = 1;
@@ -152,6 +166,13 @@ static int task_create_ex(const char *name, void (*entry)(void), bool auto_enque
     tasks[slot].rsp = (uint64_t)sp;
     tasks[slot].id = slot;
     tasks[slot].cr3 = 0; // Kernel task, use current CR3
+    tasks[slot].fd_table = NULL;
+    tasks[slot].mm = NULL;
+    tasks[slot].parent_pid = task_current_id();
+    tasks[slot].exit_code = 0;
+    tasks[slot].tgid = slot; // Group leader by default
+    tasks[slot].tls_base = 0;
+    tasks[slot].pending_signals = 0;
 
     for(int i=0; name[i] && i<31; i++) tasks[slot].name[i] = name[i];
     tasks[slot].name[31] = 0;
@@ -242,10 +263,52 @@ int task_create_user(const char *name, const void *elf_data, size_t size) {
     sp[23] = user_stack_top;   // RSP (User Stack)
     sp[24] = GDT_USER_DATA;   // SS (User Data, Ring 3)
 
-    // 5. Create security context for this process
+    // 5. Create file descriptor table with stdio
+    task->fd_table = fd_table_create();
+    if (task->fd_table) {
+        fd_init_stdio(task->fd_table);
+    }
+
+    // 5b. Create mm_struct with VMAs for ELF segments and user stack
+    task->mm = mm_create();
+    if (task->mm) {
+        // Parse ELF to register VMAs for loaded segments
+        const elf64_header_t *hdr = (const elf64_header_t *)elf_data;
+        const uint8_t *file_data = (const uint8_t *)elf_data;
+        uint64_t highest_end = 0;
+
+        for (uint16_t i = 0; i < hdr->e_phnum; i++) {
+            const elf64_phdr_t *phdr = (const elf64_phdr_t *)
+                (file_data + hdr->e_phoff + i * hdr->e_phentsize);
+            if (phdr->p_type != PT_LOAD) continue;
+
+            uint64_t seg_start = phdr->p_vaddr & ~0xFFFULL;
+            uint64_t seg_end = (phdr->p_vaddr + phdr->p_memsz + 0xFFF) & ~0xFFFULL;
+            uint32_t flags = VMA_USER | VMA_READ;
+            if (phdr->p_flags & PF_W) flags |= VMA_WRITE;
+            if (phdr->p_flags & PF_X) flags |= VMA_EXEC;
+
+            vm_area_t *vma = vma_create(seg_start, seg_end, flags, VMA_TYPE_FILE);
+            if (vma) vma_insert(task->mm, vma);
+
+            if (seg_end > highest_end) highest_end = seg_end;
+        }
+
+        // Set up heap region (brk) after highest loaded segment
+        uint64_t heap_start = (highest_end + 0xFFF) & ~0xFFFULL;
+        task->mm->start_brk = heap_start;
+        task->mm->brk = heap_start;
+
+        // Register user stack VMA
+        vm_area_t *stack_vma = vma_create(user_stack_base, user_stack_top,
+            VMA_USER | VMA_READ | VMA_WRITE, VMA_TYPE_ANONYMOUS);
+        if (stack_vma) vma_insert(task->mm, stack_vma);
+    }
+
+    // 6. Create security context for this process
     security_create_context(slot, 0); // parent=kernel
 
-    // 6. NOW enqueue the fully-initialized task
+    // 7. NOW enqueue the fully-initialized task
     cpu_t *target_cpu = smp_get_cpu_by_id(task->cpu_id);
     if (target_cpu) {
         spinlock_acquire(&target_cpu->lock);
@@ -287,22 +350,76 @@ uint64_t scheduler_switch(registers_t *regs) {
             cpu->current_task = NULL;
         } else if (current->state == TASK_TERMINATED) {
             cpu->current_task = NULL;
-            // Deferred cleanup: free user address space and kernel stack
-            // Safe because we're about to switch to a different stack
-            if (current->cr3) {
-                vmm_destroy_user_space(current->cr3);
-                current->cr3 = 0;
+            // Check if parent exists — if so, keep as zombie for wait()
+            task_t *parent = NULL;
+            if (current->parent_pid > 0 && current->parent_pid < MAX_TASKS) {
+                parent = &tasks[current->parent_pid];
+                if (parent->state == TASK_UNUSED) parent = NULL;
             }
-            if (current->stack_base) {
-                uint64_t hhdm = pmm_get_hhdm_offset();
-                uint64_t phys = (uint64_t)current->stack_base - hhdm;
-                pmm_free_pages((void *)phys, (TASK_STACK_SIZE + 4095) / 4096);
-                current->stack_base = NULL;
+            // Wake any blocked thread in same group (for thread_join)
+            for (int wi = 0; wi < MAX_TASKS; wi++) {
+                if (tasks[wi].state == TASK_BLOCKED && tasks[wi].tgid == current->tgid) {
+                    tasks[wi].state = TASK_READY;
+                    cpu_t *wcpu = smp_get_cpu_by_id(tasks[wi].cpu_id);
+                    if (wcpu) {
+                        if (wcpu != cpu) spinlock_acquire(&wcpu->lock);
+                        sched_enqueue(wcpu, &tasks[wi]);
+                        if (wcpu != cpu) spinlock_release(&wcpu->lock);
+                    }
+                }
             }
-            current->state = TASK_UNUSED;
-            spinlock_acquire(&tasks_alloc_lock);
-            num_tasks--;
-            spinlock_release(&tasks_alloc_lock);
+            if (parent) {
+                // Zombie: parent exists, keep task for reaping
+                // Wake parent if it's blocked (waiting for children)
+                if (parent->state == TASK_BLOCKED) {
+                    parent->state = TASK_READY;
+                    cpu_t *pcpu = smp_get_cpu_by_id(parent->cpu_id);
+                    if (pcpu) {
+                        if (pcpu != cpu) spinlock_acquire(&pcpu->lock);
+                        sched_enqueue(pcpu, parent);
+                        if (pcpu != cpu) spinlock_release(&pcpu->lock);
+                    }
+                }
+            } else {
+                // Orphan or thread: immediate cleanup
+                // Always free per-thread kernel stack
+                if (current->stack_base) {
+                    uint64_t hhdm = pmm_get_hhdm_offset();
+                    uint64_t phys = (uint64_t)current->stack_base - hhdm;
+                    pmm_free_pages((void *)phys, (TASK_STACK_SIZE + 4095) / 4096);
+                    current->stack_base = NULL;
+                }
+                // Only free shared resources if last thread in group
+                int group_count = 0;
+                for (int i = 0; i < MAX_TASKS; i++) {
+                    if (i == (int)current->id) continue;
+                    if (tasks[i].state != TASK_UNUSED && tasks[i].tgid == current->tgid)
+                        group_count++;
+                }
+                if (group_count == 0) {
+                    if (current->fd_table) {
+                        fd_table_destroy(current->fd_table);
+                        current->fd_table = NULL;
+                    }
+                    if (current->mm) {
+                        mm_destroy(current->mm);
+                        current->mm = NULL;
+                    }
+                    if (current->cr3) {
+                        vmm_destroy_user_space(current->cr3);
+                        current->cr3 = 0;
+                    }
+                } else {
+                    // Other threads still alive — don't free shared resources
+                    current->fd_table = NULL;
+                    current->mm = NULL;
+                    current->cr3 = 0;
+                }
+                current->state = TASK_UNUSED;
+                spinlock_acquire(&tasks_alloc_lock);
+                num_tasks--;
+                spinlock_release(&tasks_alloc_lock);
+            }
         }
     }
 
@@ -339,6 +456,11 @@ uint64_t scheduler_switch(registers_t *regs) {
         if (next->cr3 != current_cr3) {
             __asm__ volatile("mov %0, %%cr3" : : "r"(next->cr3) : "memory");
         }
+    }
+
+    // 6. Switch TLS base (FS segment) if set
+    if (next->tls_base) {
+        wrmsr(MSR_FS_BASE, next->tls_base);
     }
 
     spinlock_release(&cpu->lock);
@@ -379,13 +501,18 @@ void task_unblock(task_t *task) {
 }
 
 void task_exit(void) {
+    task_exit_code(0);
+}
+
+void task_exit_code(int code) {
     cpu_t *cpu = get_cpu();
 
     spinlock_acquire(&cpu->lock);
     task_t *current = (task_t *)cpu->current_task;
     if (current) {
-        kprintf("[SCHED] Task %d (%s) exiting on CPU %d\n",
-                current->id, current->name, cpu->cpu_id);
+        kprintf("[SCHED] Task %d (%s) exiting with code %d on CPU %d\n",
+                current->id, current->name, code, cpu->cpu_id);
+        current->exit_code = code;
         current->state = TASK_TERMINATED;
     }
     spinlock_release(&cpu->lock);
@@ -398,6 +525,338 @@ void task_exit(void) {
 
 void task_yield(void) {
     __asm__ volatile("int $0x40");
+}
+
+// Forward declaration
+static void reap_child(task_t *child);
+
+// Thread stack region (each thread gets USER_STACK_SIZE with 4KB guard)
+#define THREAD_STACK_REGION 0x7FFFFF000000ULL
+
+int task_create_thread(uint64_t entry, uint64_t arg, uint64_t user_stack) {
+    uint32_t my_pid = task_current_id();
+    task_t *parent = task_get_by_id(my_pid);
+    if (!parent) return -1;
+
+    // Allocate task slot
+    spinlock_acquire(&tasks_alloc_lock);
+    int slot = -1;
+    for (int i = 1; i < MAX_TASKS; i++) {
+        if (tasks[i].state == TASK_UNUSED || tasks[i].state == TASK_TERMINATED) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == -1) {
+        spinlock_release(&tasks_alloc_lock);
+        return -1;
+    }
+    tasks[slot].state = TASK_READY;
+    num_tasks++;
+    spinlock_release(&tasks_alloc_lock);
+
+    // Allocate kernel stack
+    void *kstack = pmm_alloc_pages((TASK_STACK_SIZE + 4095) / 4096);
+    if (!kstack) {
+        spinlock_acquire(&tasks_alloc_lock);
+        tasks[slot].state = TASK_UNUSED;
+        num_tasks--;
+        spinlock_release(&tasks_alloc_lock);
+        return -1;
+    }
+
+    uint64_t hhdm = pmm_get_hhdm_offset();
+    uint64_t kstack_virt = (uint64_t)kstack + hhdm;
+    tasks[slot].stack_base = (void *)kstack_virt;
+
+    // If no user stack provided, allocate one in the process address space
+    if (user_stack == 0) {
+        uint64_t thread_stack_top = THREAD_STACK_REGION - (uint64_t)slot * (USER_STACK_SIZE + 4096);
+        uint64_t thread_stack_base = thread_stack_top - USER_STACK_SIZE;
+        for (uint64_t addr = thread_stack_base; addr < thread_stack_top; addr += 4096) {
+            uint64_t phys = (uint64_t)pmm_alloc_page();
+            vmm_map_user_page(addr, phys);
+        }
+        user_stack = thread_stack_top;
+    }
+
+    // Build IRETQ frame on kernel stack
+    uint64_t kstack_top = kstack_virt + TASK_STACK_SIZE;
+    uint64_t *sp = (uint64_t *)kstack_top;
+
+    *--sp = GDT_USER_DATA;     // SS
+    *--sp = user_stack;         // RSP (user stack)
+    *--sp = 0x202;              // RFLAGS (IF=1)
+    *--sp = GDT_USER_CODE;     // CS
+    *--sp = entry;              // RIP
+
+    *--sp = 0; // err_code
+    *--sp = 0; // int_no
+
+    // GPRs: R15, R14, R13, R12, R11, R10, R9, R8, RBP, RDI, RSI, RDX, RCX, RBX, RAX
+    *--sp = 0;     // R15
+    *--sp = 0;     // R14
+    *--sp = 0;     // R13
+    *--sp = 0;     // R12
+    *--sp = 0;     // R11
+    *--sp = 0;     // R10
+    *--sp = 0;     // R9
+    *--sp = 0;     // R8
+    *--sp = 0;     // RBP
+    *--sp = arg;   // RDI = first argument
+    *--sp = 0;     // RSI
+    *--sp = 0;     // RDX
+    *--sp = 0;     // RCX
+    *--sp = 0;     // RBX
+    *--sp = 0;     // RAX
+
+    // Segment registers
+    *--sp = GDT_USER_DATA; // DS
+    *--sp = GDT_USER_DATA; // ES
+    *--sp = GDT_USER_DATA; // FS
+
+    tasks[slot].rsp = (uint64_t)sp;
+    tasks[slot].id = slot;
+    tasks[slot].cr3 = parent->cr3;          // Share address space
+    tasks[slot].fd_table = parent->fd_table; // Share fd table
+    tasks[slot].mm = parent->mm;            // Share mm_struct
+    tasks[slot].parent_pid = parent->id;
+    tasks[slot].exit_code = 0;
+    tasks[slot].tgid = parent->tgid;         // Same thread group
+    tasks[slot].tls_base = 0;
+    tasks[slot].pending_signals = 0;
+
+    // Copy name with /T suffix
+    int i;
+    for (i = 0; parent->name[i] && i < 29; i++) tasks[slot].name[i] = parent->name[i];
+    tasks[slot].name[i++] = '/';
+    tasks[slot].name[i++] = 'T';
+    tasks[slot].name[i] = 0;
+
+    // Assign to CPU (round robin)
+    int cpu_count = smp_get_cpu_count();
+    uint32_t target_cpu_id = __sync_fetch_and_add(&next_cpu_rr, 1) % cpu_count;
+    tasks[slot].cpu_id = target_cpu_id;
+
+    cpu_t *target_cpu = smp_get_cpu_by_id(target_cpu_id);
+    if (target_cpu) {
+        spinlock_acquire(&target_cpu->lock);
+        sched_enqueue(target_cpu, &tasks[slot]);
+        spinlock_release(&target_cpu->lock);
+    }
+
+    kprintf("[SCHED] Created Thread %d in group %d on CPU %d\n", slot, parent->tgid, target_cpu_id);
+    return slot;
+}
+
+int task_thread_join(uint32_t tid) {
+    if (tid == 0 || tid >= MAX_TASKS) return -1;
+
+    uint32_t my_pid = task_current_id();
+    task_t *me = task_get_by_id(my_pid);
+    if (!me) return -1;
+
+    task_t *target = &tasks[tid];
+
+    // Must be in the same thread group
+    if (target->tgid != me->tgid) return -1;
+
+    while (1) {
+        if (target->state == TASK_TERMINATED) {
+            int code = target->exit_code;
+            // Reap the thread
+            reap_child(target);
+            return code;
+        }
+        if (target->state == TASK_UNUSED) return -1;
+
+        // Block until thread exits
+        task_block();
+    }
+}
+
+// Fork: create child process with COW
+int task_fork(registers_t *parent_regs) {
+    uint32_t my_pid = task_current_id();
+    task_t *parent = task_get_by_id(my_pid);
+    if (!parent || !parent->cr3) return -1;
+
+    // Allocate task slot
+    spinlock_acquire(&tasks_alloc_lock);
+    int slot = -1;
+    for (int i = 1; i < MAX_TASKS; i++) {
+        if (tasks[i].state == TASK_UNUSED || tasks[i].state == TASK_TERMINATED) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == -1) {
+        spinlock_release(&tasks_alloc_lock);
+        return -1;
+    }
+    tasks[slot].state = TASK_READY;
+    num_tasks++;
+    spinlock_release(&tasks_alloc_lock);
+
+    // Clone page tables with COW
+    uint64_t child_cr3 = vmm_fork_user_space(parent->cr3);
+    if (!child_cr3) {
+        spinlock_acquire(&tasks_alloc_lock);
+        tasks[slot].state = TASK_UNUSED;
+        num_tasks--;
+        spinlock_release(&tasks_alloc_lock);
+        return -1;
+    }
+
+    // Allocate kernel stack for child
+    void *kstack = pmm_alloc_pages((TASK_STACK_SIZE + 4095) / 4096);
+    if (!kstack) {
+        vmm_destroy_user_space(child_cr3);
+        spinlock_acquire(&tasks_alloc_lock);
+        tasks[slot].state = TASK_UNUSED;
+        num_tasks--;
+        spinlock_release(&tasks_alloc_lock);
+        return -1;
+    }
+
+    uint64_t hhdm = pmm_get_hhdm_offset();
+    uint64_t kstack_virt = (uint64_t)kstack + hhdm;
+    tasks[slot].stack_base = (void *)kstack_virt;
+
+    // Copy the parent's register frame (interrupt stack frame) to child's kernel stack
+    // This makes the child resume at the same point as the parent
+    uint64_t kstack_top = kstack_virt + TASK_STACK_SIZE;
+    registers_t *child_regs = (registers_t *)(kstack_top - sizeof(registers_t));
+    memcpy(child_regs, parent_regs, sizeof(registers_t));
+
+    // Child returns 0 from fork
+    child_regs->rax = 0;
+
+    tasks[slot].rsp = (uint64_t)child_regs;
+    tasks[slot].id = slot;
+    tasks[slot].cr3 = child_cr3;
+    tasks[slot].parent_pid = parent->id;
+    tasks[slot].exit_code = 0;
+    tasks[slot].tgid = slot;  // New process group
+    tasks[slot].tls_base = parent->tls_base;
+    tasks[slot].pending_signals = 0;
+
+    // Clone fd table
+    if (parent->fd_table) {
+        tasks[slot].fd_table = fd_table_create();
+        if (tasks[slot].fd_table) {
+            memcpy(tasks[slot].fd_table, parent->fd_table, sizeof(struct fd_table));
+        }
+    } else {
+        tasks[slot].fd_table = NULL;
+    }
+
+    // Clone mm_struct
+    if (parent->mm) {
+        tasks[slot].mm = mm_clone(parent->mm);
+    } else {
+        tasks[slot].mm = NULL;
+    }
+
+    // Copy name
+    int i;
+    for (i = 0; parent->name[i] && i < 31; i++) tasks[slot].name[i] = parent->name[i];
+    tasks[slot].name[i] = 0;
+
+    // Assign to CPU
+    int cpu_count = smp_get_cpu_count();
+    uint32_t target_cpu_id = __sync_fetch_and_add(&next_cpu_rr, 1) % cpu_count;
+    tasks[slot].cpu_id = target_cpu_id;
+
+    cpu_t *target_cpu = smp_get_cpu_by_id(target_cpu_id);
+    if (target_cpu) {
+        spinlock_acquire(&target_cpu->lock);
+        sched_enqueue(target_cpu, &tasks[slot]);
+        spinlock_release(&target_cpu->lock);
+    }
+
+    kprintf("[SCHED] Forked PID %d -> %d (COW)\n", parent->id, slot);
+    return slot;
+}
+
+// Helper: reap a terminated child (free its resources, mark UNUSED)
+static void reap_child(task_t *child) {
+    if (child->fd_table) {
+        fd_table_destroy(child->fd_table);
+        child->fd_table = NULL;
+    }
+    if (child->mm) {
+        mm_destroy(child->mm);
+        child->mm = NULL;
+    }
+    if (child->cr3) {
+        vmm_destroy_user_space(child->cr3);
+        child->cr3 = 0;
+    }
+    if (child->stack_base) {
+        uint64_t hhdm = pmm_get_hhdm_offset();
+        uint64_t phys = (uint64_t)child->stack_base - hhdm;
+        pmm_free_pages((void *)phys, (TASK_STACK_SIZE + 4095) / 4096);
+        child->stack_base = NULL;
+    }
+    child->state = TASK_UNUSED;
+    spinlock_acquire(&tasks_alloc_lock);
+    num_tasks--;
+    spinlock_release(&tasks_alloc_lock);
+}
+
+int task_wait(int *status) {
+    uint32_t my_pid = task_current_id();
+
+    while (1) {
+        int has_children = 0;
+
+        // Scan for children
+        for (int i = 1; i < MAX_TASKS; i++) {
+            if (tasks[i].state == TASK_UNUSED) continue;
+            if (tasks[i].parent_pid != my_pid) continue;
+
+            has_children = 1;
+
+            if (tasks[i].state == TASK_TERMINATED) {
+                // Found a zombie child — reap it
+                int child_pid = tasks[i].id;
+                if (status) *status = tasks[i].exit_code;
+                reap_child(&tasks[i]);
+                return child_pid;
+            }
+        }
+
+        if (!has_children) return -1; // No children at all
+
+        // Children exist but none terminated yet — block
+        task_block();
+        // Woken up: loop and check again
+    }
+}
+
+int task_waitpid(uint32_t pid, int *status) {
+    if (pid == 0 || pid >= MAX_TASKS) return -1;
+
+    uint32_t my_pid = task_current_id();
+    task_t *child = &tasks[pid];
+
+    // Verify it's our child
+    if (child->state == TASK_UNUSED || child->parent_pid != my_pid)
+        return -1;
+
+    while (1) {
+        if (child->state == TASK_TERMINATED) {
+            if (status) *status = child->exit_code;
+            reap_child(child);
+            return (int)pid;
+        }
+
+        if (child->state == TASK_UNUSED) return -1; // Already gone
+
+        // Child still running — block
+        task_block();
+    }
 }
 
 void scheduler_debug_print_tasks(void) {

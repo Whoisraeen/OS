@@ -1,4 +1,5 @@
 #include "syscall.h"
+#include "idt.h"
 #include "console.h"
 #include "serial.h"
 #include "io.h"
@@ -7,10 +8,16 @@
 #include "security.h"
 #include "sched.h"
 #include "vmm.h"
+#include "pmm.h"
 #include "vfs.h"
 #include "initrd.h"
 #include "heap.h"
 #include "string.h"
+#include "fd.h"
+#include "pipe.h"
+#include "signal.h"
+#include "futex.h"
+#include "vm_area.h"
 
 // MSR registers
 #define MSR_EFER     0xC0000080
@@ -45,7 +52,9 @@ void syscall_init(void) {
 }
 
 // Syscall handler — called from assembly
-uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
+// regs is non-NULL when called via INT 0x80 (for fork), NULL via SYSCALL instruction
+uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3,
+                          struct interrupt_frame *regs) {
     // Get real PID from scheduler (not hardcoded!)
     uint32_t current_pid = task_current_id();
 
@@ -53,39 +62,363 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
         case SYS_EXIT:
             kprintf("[SYSCALL] Process %u exit(%d)\n", current_pid, (int)arg1);
             security_destroy_context(current_pid);
-            task_exit(); // Properly yields to scheduler instead of halting
+            task_exit_code((int)arg1);
             return 0;    // Never reached
 
         case SYS_WRITE: {
             // arg1 = fd, arg2 = buf, arg3 = len
-            if (arg1 == 1) { // stdout
-                // Validate user buffer
-                if (!is_user_address(arg2, arg3)) {
-                    kprintf("[SYSCALL] SYS_WRITE: bad user address 0x%lx\n", arg2);
-                    return (uint64_t)-1;
-                }
+            if (!is_user_address(arg2, arg3)) return (uint64_t)-1;
 
-                // Check file write capability
-                if (!security_check_file_access(current_pid, "/dev/console", CAP_FILE_WRITE)) {
-                    return (uint64_t)-1;
-                }
+            task_t *task = task_get_by_id(current_pid);
+            if (!task || !task->fd_table) return (uint64_t)-1;
 
-                const char *buf = (const char *)arg2;
-                for (size_t i = 0; i < arg3; i++) {
-                    console_putc(buf[i]);
-                    serial_putc(buf[i]);
-                }
-                return arg3;
+            fd_entry_t *entry = fd_get(task->fd_table, (int)arg1);
+            if (!entry) return (uint64_t)-1;
+
+            switch (entry->type) {
+                case FD_DEVICE:
+                    if (entry->dev && entry->dev->write)
+                        return entry->dev->write(entry->dev, (const uint8_t *)arg2, arg3);
+                    return (uint64_t)-1;
+                case FD_FILE:
+                    if (entry->node) {
+                        size_t written = vfs_write(entry->node, entry->offset, arg3, (uint8_t *)arg2);
+                        entry->offset += written;
+                        return written;
+                    }
+                    return (uint64_t)-1;
+                case FD_PIPE:
+                    if (entry->pipe)
+                        return pipe_write((pipe_t *)entry->pipe, (const uint8_t *)arg2, arg3);
+                    return (uint64_t)-1;
+                default:
+                    return (uint64_t)-1;
             }
-            return (uint64_t)-1;
         }
 
-        case SYS_READ:
-            return (uint64_t)-1;
+        case SYS_READ: {
+            // arg1 = fd, arg2 = buf, arg3 = len
+            if (!is_user_address(arg2, arg3)) return (uint64_t)-1;
+
+            task_t *task = task_get_by_id(current_pid);
+            if (!task || !task->fd_table) return (uint64_t)-1;
+
+            fd_entry_t *entry = fd_get(task->fd_table, (int)arg1);
+            if (!entry) return (uint64_t)-1;
+
+            switch (entry->type) {
+                case FD_DEVICE:
+                    if (entry->dev && entry->dev->read)
+                        return entry->dev->read(entry->dev, (uint8_t *)arg2, arg3);
+                    return (uint64_t)-1;
+                case FD_FILE:
+                    if (entry->node) {
+                        size_t bytes = vfs_read(entry->node, entry->offset, arg3, (uint8_t *)arg2);
+                        entry->offset += bytes;
+                        return bytes;
+                    }
+                    return (uint64_t)-1;
+                case FD_PIPE:
+                    if (entry->pipe)
+                        return pipe_read((pipe_t *)entry->pipe, (uint8_t *)arg2, arg3);
+                    return (uint64_t)-1;
+                default:
+                    return (uint64_t)-1;
+            }
+        }
+
+        case SYS_OPEN: {
+            // arg1 = path (user), arg2 = flags
+            char path[256];
+            if (copy_string_from_user(path, (const char *)arg1, sizeof(path)) < 0)
+                return (uint64_t)-1;
+
+            vfs_node_t *node = initrd_find(path);
+            if (!node) return (uint64_t)-1;
+
+            task_t *task = task_get_by_id(current_pid);
+            if (!task || !task->fd_table) return (uint64_t)-1;
+
+            int fd = fd_alloc(task->fd_table);
+            if (fd < 0) return (uint64_t)-1;
+
+            fd_entry_t *entry = &task->fd_table->entries[fd];
+            entry->type = FD_FILE;
+            entry->node = node;
+            entry->offset = 0;
+            entry->flags = (uint32_t)arg2;
+            return (uint64_t)fd;
+        }
+
+        case SYS_CLOSE: {
+            // arg1 = fd
+            task_t *task = task_get_by_id(current_pid);
+            if (!task || !task->fd_table) return (uint64_t)-1;
+
+            fd_entry_t *entry = fd_get(task->fd_table, (int)arg1);
+            if (!entry) return (uint64_t)-1;
+
+            // Handle pipe close (decrement reader/writer count)
+            if (entry->type == FD_PIPE && entry->pipe) {
+                int is_write = (entry->flags & O_WRONLY) ? 1 : 0;
+                pipe_close((pipe_t *)entry->pipe, is_write);
+            }
+
+            fd_free(task->fd_table, (int)arg1);
+            return 0;
+        }
+
+        case SYS_LSEEK: {
+            // arg1 = fd, arg2 = offset, arg3 = whence
+            task_t *task = task_get_by_id(current_pid);
+            if (!task || !task->fd_table) return (uint64_t)-1;
+
+            fd_entry_t *entry = fd_get(task->fd_table, (int)arg1);
+            if (!entry || entry->type != FD_FILE || !entry->node)
+                return (uint64_t)-1;
+
+            int64_t offset = (int64_t)arg2;
+            size_t new_pos;
+
+            switch (arg3) {
+                case SEEK_SET:
+                    if (offset < 0) return (uint64_t)-1;
+                    new_pos = (size_t)offset;
+                    break;
+                case SEEK_CUR:
+                    if (offset < 0 && (size_t)(-offset) > entry->offset)
+                        return (uint64_t)-1;
+                    new_pos = entry->offset + offset;
+                    break;
+                case SEEK_END:
+                    if (offset < 0 && (size_t)(-offset) > entry->node->length)
+                        return (uint64_t)-1;
+                    new_pos = entry->node->length + offset;
+                    break;
+                default:
+                    return (uint64_t)-1;
+            }
+
+            entry->offset = new_pos;
+            return (uint64_t)new_pos;
+        }
+
+        case SYS_BRK: {
+            // arg1 = new break address (0 = query current break)
+            task_t *task = task_get_by_id(current_pid);
+            if (!task || !task->mm) return (uint64_t)-1;
+
+            if (arg1 == 0) {
+                // Query current break
+                return task->mm->brk;
+            }
+
+            uint64_t new_brk = (arg1 + 0xFFF) & ~0xFFFULL; // Page-align
+            uint64_t old_brk = task->mm->brk;
+
+            if (new_brk < task->mm->start_brk) return (uint64_t)-1;
+
+            if (new_brk > old_brk) {
+                // Expanding: create VMA for new region (demand-paged)
+                vm_area_t *vma = vma_create(old_brk, new_brk,
+                    VMA_USER | VMA_READ | VMA_WRITE, VMA_TYPE_ANONYMOUS);
+                if (vma) vma_insert(task->mm, vma);
+            } else if (new_brk < old_brk) {
+                // Shrinking: remove VMA region and unmap pages
+                vma_remove(task->mm, new_brk, old_brk);
+                for (uint64_t addr = new_brk; addr < old_brk; addr += PAGE_SIZE) {
+                    uint64_t pte = vmm_get_pte(addr);
+                    if (pte & 1) { // PTE_PRESENT
+                        uint64_t phys = pte & 0x000FFFFFFFFFF000ULL;
+                        vmm_unmap_page(addr);
+                        pmm_free_page((void *)phys);
+                    }
+                }
+            }
+
+            task->mm->brk = new_brk;
+            return new_brk;
+        }
+
+        case SYS_MMAP: {
+            // arg1 = hint address (0 = kernel chooses), arg2 = size, arg3 = prot flags
+            task_t *task = task_get_by_id(current_pid);
+            if (!task || !task->mm) return (uint64_t)-1;
+
+            uint64_t size = (arg2 + 0xFFF) & ~0xFFFULL;
+            if (size == 0) return (uint64_t)-1;
+
+            uint64_t addr;
+            if (arg1 != 0) {
+                addr = arg1 & ~0xFFFULL;
+                // Check if requested range is free
+                for (uint64_t a = addr; a < addr + size; a += PAGE_SIZE) {
+                    if (vma_find(task->mm, a)) {
+                        addr = 0; // Conflict, fall through to auto-assign
+                        break;
+                    }
+                }
+            } else {
+                addr = 0;
+            }
+
+            if (addr == 0) {
+                addr = vma_find_free(task->mm, size);
+                if (addr == 0) return (uint64_t)-1;
+            }
+
+            // Build VMA flags
+            uint32_t flags = VMA_USER | VMA_READ;
+            if (arg3 & 2) flags |= VMA_WRITE; // PROT_WRITE
+            if (arg3 & 4) flags |= VMA_EXEC;  // PROT_EXEC
+
+            vm_area_t *vma = vma_create(addr, addr + size, flags, VMA_TYPE_ANONYMOUS);
+            if (!vma) return (uint64_t)-1;
+            vma_insert(task->mm, vma);
+
+            // Pages are demand-allocated on first access (page fault handler)
+            return addr;
+        }
+
+        case SYS_MUNMAP: {
+            // arg1 = address, arg2 = size
+            task_t *task = task_get_by_id(current_pid);
+            if (!task || !task->mm) return (uint64_t)-1;
+
+            uint64_t addr = arg1 & ~0xFFFULL;
+            uint64_t size = (arg2 + 0xFFF) & ~0xFFFULL;
+            if (size == 0) return (uint64_t)-1;
+
+            // Remove VMA region
+            vma_remove(task->mm, addr, addr + size);
+
+            // Unmap physical pages
+            for (uint64_t a = addr; a < addr + size; a += PAGE_SIZE) {
+                uint64_t pte = vmm_get_pte(a);
+                if (pte & 1) {
+                    uint64_t phys = pte & 0x000FFFFFFFFFF000ULL;
+                    vmm_unmap_page(a);
+                    pmm_free_page((void *)phys);
+                }
+            }
+            return 0;
+        }
+
+        case SYS_FORK: {
+            // Fork requires full register frame (must use INT 0x80, not SYSCALL)
+            if (!regs) return (uint64_t)-1;
+            return (uint64_t)task_fork((registers_t *)regs);
+        }
 
         case SYS_YIELD:
             task_yield();
             return 0;
+
+        case SYS_DUP: {
+            // arg1 = old_fd
+            task_t *task = task_get_by_id(current_pid);
+            if (!task || !task->fd_table) return (uint64_t)-1;
+            return (uint64_t)fd_dup(task->fd_table, (int)arg1);
+        }
+
+        case SYS_DUP2: {
+            // arg1 = old_fd, arg2 = new_fd
+            task_t *task = task_get_by_id(current_pid);
+            if (!task || !task->fd_table) return (uint64_t)-1;
+            return (uint64_t)fd_dup2(task->fd_table, (int)arg1, (int)arg2);
+        }
+
+        // === Process Management Syscalls ===
+        case SYS_GETPID:
+            return (uint64_t)current_pid;
+
+        case SYS_GETPPID: {
+            task_t *task = task_get_by_id(current_pid);
+            if (!task) return 0;
+            return (uint64_t)task->parent_pid;
+        }
+
+        case SYS_WAIT: {
+            // arg1 = pointer to status (user space, may be NULL)
+            int status = 0;
+            int child_pid = task_wait(&status);
+            if (child_pid >= 0 && arg1 != 0) {
+                if (is_user_address(arg1, sizeof(int))) {
+                    *(int *)arg1 = status;
+                }
+            }
+            return (uint64_t)child_pid;
+        }
+
+        case SYS_WAITPID: {
+            // arg1 = pid, arg2 = pointer to status (user space, may be NULL)
+            int status = 0;
+            int child_pid = task_waitpid((uint32_t)arg1, &status);
+            if (child_pid >= 0 && arg2 != 0) {
+                if (is_user_address(arg2, sizeof(int))) {
+                    *(int *)arg2 = status;
+                }
+            }
+            return (uint64_t)child_pid;
+        }
+
+        case SYS_KILL: {
+            // arg1 = pid, arg2 = signal
+            return (uint64_t)signal_send((uint32_t)arg1, (int)arg2);
+        }
+
+        case SYS_SIGNAL: {
+            // arg1 = signal number, arg2 = action (SIG_DFL=0, SIG_IGN=1)
+            return (uint64_t)signal_set_handler(current_pid, (int)arg1, (int)arg2);
+        }
+
+        case SYS_PIPE: {
+            // arg1 = pointer to int[2] (user space) — [0]=read_fd, [1]=write_fd
+            if (!is_user_address(arg1, 2 * sizeof(int))) return (uint64_t)-1;
+
+            task_t *task = task_get_by_id(current_pid);
+            if (!task || !task->fd_table) return (uint64_t)-1;
+
+            int rfd, wfd;
+            if (pipe_create(task->fd_table, &rfd, &wfd) < 0) return (uint64_t)-1;
+
+            int *user_fds = (int *)arg1;
+            user_fds[0] = rfd;
+            user_fds[1] = wfd;
+            return 0;
+        }
+
+        // === Thread Syscalls ===
+        case SYS_THREAD_CREATE: {
+            // arg1 = entry point, arg2 = argument, arg3 = stack (0 = kernel allocates)
+            return (uint64_t)task_create_thread(arg1, arg2, arg3);
+        }
+
+        case SYS_THREAD_EXIT: {
+            // arg1 = exit code
+            task_exit_code((int)arg1);
+            return 0; // Never reached
+        }
+
+        case SYS_THREAD_JOIN: {
+            // arg1 = thread ID
+            return (uint64_t)task_thread_join((uint32_t)arg1);
+        }
+
+        case SYS_FUTEX: {
+            // arg1 = address, arg2 = operation, arg3 = value
+            if (!is_user_address(arg1, sizeof(uint64_t))) return (uint64_t)-1;
+            return (uint64_t)futex_op((uint64_t *)arg1, (int)arg2, (uint32_t)arg3);
+        }
+
+        case SYS_SET_TLS: {
+            // arg1 = TLS base address
+            task_t *task = task_get_by_id(current_pid);
+            if (!task) return (uint64_t)-1;
+            task->tls_base = arg1;
+            wrmsr(0xC0000100, arg1); // MSR_FS_BASE — apply immediately
+            return 0;
+        }
 
         // === IPC Syscalls ===
         case SYS_IPC_CREATE: {

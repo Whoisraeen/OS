@@ -6,7 +6,17 @@
 // Syscall Numbers
 #define SYS_EXIT         0
 #define SYS_WRITE        1
+#define SYS_OPEN         2
+#define SYS_READ         3
+#define SYS_CLOSE        4
+#define SYS_BRK          5
+#define SYS_MMAP         6
+#define SYS_MUNMAP       7
+#define SYS_LSEEK        8
+#define SYS_FORK         9
 #define SYS_YIELD        24
+#define SYS_DUP          32
+#define SYS_DUP2         33
 #define SYS_IPC_CREATE   10
 #define SYS_IPC_SEND     11
 #define SYS_IPC_RECV     12
@@ -17,7 +27,19 @@
 #define SYS_IPC_SHMEM_CREATE 17
 #define SYS_IPC_SHMEM_MAP    18
 #define SYS_IPC_SHMEM_UNMAP  19
+#define SYS_GETPID       39
+#define SYS_GETPPID      40
 #define SYS_PROC_EXEC    41
+#define SYS_WAIT         42
+#define SYS_WAITPID      43
+#define SYS_KILL         44
+#define SYS_PIPE         45
+#define SYS_SIGNAL       46
+#define SYS_THREAD_CREATE 50
+#define SYS_THREAD_EXIT  51
+#define SYS_THREAD_JOIN  52
+#define SYS_FUTEX        53
+#define SYS_SET_TLS      54
 
 // IPC Constants
 #define IPC_PORT_FLAG_RECEIVE (1 << 1)
@@ -56,6 +78,31 @@ static inline long syscall3(long num, long arg1, long arg2, long arg3) {
         : "rcx", "r11", "memory"
     );
     return ret;
+}
+
+// Fork wrapper — uses INT 0x80 (not SYSCALL) because fork needs full register frame
+static inline long sys_fork(void) {
+    long ret;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(ret)
+        : "a"((long)SYS_FORK)
+        : "rcx", "r11", "memory"
+    );
+    return ret;
+}
+
+// Memory management wrappers
+static inline long sys_brk(long addr) {
+    return syscall1(SYS_BRK, addr);
+}
+
+static inline long sys_mmap(long addr, long size, long prot) {
+    return syscall3(SYS_MMAP, addr, size, prot);
+}
+
+static inline long sys_munmap(long addr, long size) {
+    return syscall2(SYS_MUNMAP, addr, size);
 }
 
 #endif // SYSCALLS_H

@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define MAX_TASKS 32
+#define MAX_TASKS 128
 #define TASK_STACK_SIZE (16 * 1024)
 
 // User-space memory layout constants
@@ -30,6 +30,10 @@ typedef enum {
     TASK_TERMINATED
 } task_state_t;
 
+// Forward declarations
+struct fd_table;
+struct mm_struct;
+
 typedef struct task_t {
     uint32_t id;
     char name[32];
@@ -38,6 +42,23 @@ typedef struct task_t {
     uint64_t rsp;        // Kernel stack pointer (saved context)
     void *stack_base;    // Base of allocated kernel stack
     uint64_t cr3;        // Page table (0 = use kernel CR3)
+
+    // Per-process file descriptor table
+    struct fd_table *fd_table;
+
+    // Per-process memory descriptor (VMAs, brk, mmap)
+    struct mm_struct *mm;
+
+    // Process relationships
+    uint32_t parent_pid;    // Parent process ID (0 = kernel)
+    int32_t exit_code;      // Exit code (valid when TASK_TERMINATED)
+
+    // Thread support
+    uint32_t tgid;          // Thread group ID (= id for group leader)
+    uint64_t tls_base;      // Thread-local storage FS base address
+
+    // Pending signals (bitmask)
+    uint64_t pending_signals;
 
     // Wakeup time for sleeping tasks
     uint64_t wakeup_ticks;
@@ -69,6 +90,27 @@ void task_unblock(task_t *task);
 
 // Get a task by its ID (returns NULL if invalid or unused)
 task_t *task_get_by_id(uint32_t id);
+
+// Create a new thread in the current process.
+// Returns thread ID (task slot) or -1 on failure.
+int task_create_thread(uint64_t entry, uint64_t arg, uint64_t user_stack);
+
+// Join a thread (block until it exits). Returns exit code or -1.
+int task_thread_join(uint32_t tid);
+
+// Wait for any child to exit. Returns child PID, stores exit code in *status.
+// Returns -1 if no children. Blocks if children exist but none have exited.
+int task_wait(int *status);
+
+// Wait for specific child. Returns child PID, stores exit code in *status.
+// Returns -1 if child not found or not a child of caller.
+int task_waitpid(uint32_t pid, int *status);
+
+// Exit with a specific exit code
+void task_exit_code(int code);
+
+// Fork the current process (COW). Returns child PID to parent, 0 to child, -1 on error.
+int task_fork(registers_t *parent_regs);
 
 // Debug
 void scheduler_debug_print_tasks(void);

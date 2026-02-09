@@ -94,6 +94,7 @@ syscall_entry:
     mov rdx, rsi    ; 3rd arg = User Arg2
     mov rsi, rdi    ; 2nd arg = User Arg1
     mov rdi, rax    ; 1st arg = Syscall Number
+    xor r8d, r8d    ; 5th arg = NULL (no register frame for SYSCALL path)
 
     call syscall_handler
 

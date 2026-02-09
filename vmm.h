@@ -59,6 +59,19 @@ uint64_t vmm_get_pml4(void);
 // Create a new PML4 for a user process (maps kernel space)
 uint64_t vmm_create_user_pml4(void);
 
+// Page fault handling (returns 1 if handled, 0 if not)
+// Called from idt.c page fault handler
+int vmm_handle_page_fault(uint64_t fault_addr, uint64_t error_code);
+
+// Get the PTE value for a given virtual address using the current CR3
+// Returns 0 if not mapped
+uint64_t vmm_get_pte(uint64_t virt);
+
+// Clone user-space page tables for fork with COW
+// Makes all writable pages read-only in both parent and child, increments refcounts
+// Returns new PML4 physical address (0 on failure)
+uint64_t vmm_fork_user_space(uint64_t parent_pml4_phys);
+
 // User-space pointer validation and copy functions
 // Returns true if the entire range [addr, addr+size) is in user space
 bool is_user_address(uint64_t addr, size_t size);

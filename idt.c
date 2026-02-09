@@ -24,7 +24,8 @@ extern uint64_t fb_width;
 extern uint64_t fb_height;
 
 // Syscall handler
-extern uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3);
+extern uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3,
+                                 struct interrupt_frame *regs);
 
 void idt_set_gate(uint8_t num, uint64_t base, uint16_t sel, uint8_t flags) {
     idt[num].offset_low    = (base & 0xFFFF);
@@ -67,7 +68,7 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
 
     // ---- Syscall (int 0x80 = Vector 128) ----
     if (frame->int_no == 128) {
-        frame->rax = syscall_handler(frame->rax, frame->rdi, frame->rsi, frame->rdx);
+        frame->rax = syscall_handler(frame->rax, frame->rdi, frame->rsi, frame->rdx, frame);
         return (uint64_t)frame;
     }
 
@@ -75,6 +76,14 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
     if (frame->int_no == 14) {
         uint64_t faulting_addr;
         __asm__ volatile("mov %%cr2, %0" : "=r"(faulting_addr));
+
+        // Try demand paging / COW handling for user-mode faults
+        if (frame->cs & 3) {
+            extern int vmm_handle_page_fault(uint64_t fault_addr, uint64_t error_code);
+            if (vmm_handle_page_fault(faulting_addr, frame->err_code)) {
+                return (uint64_t)frame; // Handled — resume execution
+            }
+        }
 
         kprintf("\n*** PAGE FAULT ***\n");
         kprintf("Address: 0x%lx\n", faulting_addr);
@@ -95,8 +104,6 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
             kprintf("[PAGE FAULT] User process fault — terminating task %u\n",
                     task_current_id());
             task_exit();
-            // task_exit yields via int 0x40, which re-enters isr_handler
-            // and calls scheduler_switch. If we get here, just return.
             return (uint64_t)frame;
         }
 
