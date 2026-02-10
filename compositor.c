@@ -9,6 +9,19 @@ extern uint32_t *fb_ptr;
 extern uint64_t fb_width;
 extern uint64_t fb_height;
 
+// Resize edge constants
+#define RESIZE_NONE        0
+#define RESIZE_TOP         1
+#define RESIZE_BOTTOM      2
+#define RESIZE_LEFT        3
+#define RESIZE_RIGHT       4
+#define RESIZE_TOP_LEFT    5
+#define RESIZE_TOP_RIGHT   6
+#define RESIZE_BOTTOM_LEFT 7
+#define RESIZE_BOTTOM_RIGHT 8
+
+#define RESIZE_BORDER 8  // Pixel width of resize border
+
 // Global compositor
 static compositor_t comp;
 static comp_window_t window_pool[16];
@@ -346,17 +359,23 @@ void compositor_render(void) {
     // Handle input
     int left_pressed = (buttons & MOUSE_LEFT) && !(last_buttons & MOUSE_LEFT);
     
-    // Window dragging state
+    // Window dragging/resizing state
     static comp_window_t *dragging = NULL;
     static int drag_ox = 0, drag_oy = 0;
     
+    // Update animations first
+    compositor_update_animations();
+
     if (left_pressed) {
         // Check windows in reverse (top first)
         comp_window_t *hit = NULL;
         for (comp_window_t *w = comp.windows; w; w = w->next) {
             if (!w->active || !w->visible) continue;
-            if (mx >= w->x && mx < w->x + w->width &&
-                my >= w->y && my < w->y + w->height) {
+            
+            // Expand hit area slightly for resize borders
+            int border = RESIZE_BORDER;
+            if (mx >= w->x - border && mx < w->x + w->width + border &&
+                my >= w->y - border && my < w->y + w->height + border) {
                 hit = w;  // Keep going to find topmost
             }
         }
@@ -364,12 +383,34 @@ void compositor_render(void) {
         if (hit) {
             compositor_focus_window(hit);
             
-            // Check if in title bar (not close button)
-            if (my >= hit->y && my < hit->y + 28) {
+            // 1. Check Resize first
+            int edge = compositor_check_resize_edge(hit, mx, my);
+            if (edge != RESIZE_NONE) {
+                compositor_start_resize(hit, edge);
+            } 
+            // 2. Check Title Bar (Drag vs Close vs Maximize)
+            else if (my >= hit->y && my < hit->y + 28 && mx >= hit->x && mx < hit->x + hit->width) {
                 if (mx < hit->x + hit->width - 28) {
+                    // Start dragging
                     dragging = hit;
                     drag_ox = mx - hit->x;
                     drag_oy = my - hit->y;
+                    
+                    // If maximized, restore it but keep dragging (Windows style)
+                     if (dragging->maximized) {
+                          // Calculate relative X position using fixed point (x1000)
+                          int old_width = dragging->width;
+                          int rel_x = mx - dragging->x;
+                          int ratio_1000 = (rel_x * 1000) / old_width;
+                          
+                          compositor_restore_window(dragging);
+                          
+                          // Adjust X to keep relative mouse position
+                          dragging->x = mx - (dragging->width * ratio_1000) / 1000;
+                          dragging->y = my - (dragging->height / 2); // Center Y on mouse roughly
+                          drag_ox = mx - dragging->x;
+                          drag_oy = my - dragging->y;
+                     }
                 } else {
                     // Close button clicked
                     compositor_destroy_window(hit);
@@ -379,15 +420,38 @@ void compositor_render(void) {
     }
     
     if (buttons & MOUSE_LEFT) {
-        if (dragging) {
+        // Handle Resizing
+        if (comp.active && comp.active->resizing) {
+            compositor_do_resize(comp.active, mx, my);
+        } 
+        // Handle Dragging
+        else if (dragging) {
             dragging->x = mx - drag_ox;
             dragging->y = my - drag_oy;
-            if (dragging->x < 0) dragging->x = 0;
+            
+            // Keep window on screen (mostly)
             if (dragging->y < 0) dragging->y = 0;
+            
             comp.dirty = 1;
         }
     } else {
-        dragging = NULL;
+        // Mouse Released
+        if (dragging) {
+            // Check for Window Snapping
+            if (mx < 10) {
+                compositor_snap_window(dragging, 0); // Snap Left
+            } else if (mx > comp.width - 10) {
+                compositor_snap_window(dragging, 1); // Snap Right
+            } else if (my < 10) {
+                compositor_maximize_window(dragging); // Snap Top (Maximize)
+            }
+            
+            dragging = NULL;
+        }
+        
+        if (comp.active && comp.active->resizing) {
+            compositor_end_resize(comp.active);
+        }
     }
     
     last_buttons = buttons;
@@ -556,19 +620,6 @@ void compositor_toggle_maximize(comp_window_t *win) {
 // ========================================================================
 // NEW: Window Resizing
 // ========================================================================
-
-// Resize edge constants
-#define RESIZE_NONE        0
-#define RESIZE_TOP         1
-#define RESIZE_BOTTOM      2
-#define RESIZE_LEFT        3
-#define RESIZE_RIGHT       4
-#define RESIZE_TOP_LEFT    5
-#define RESIZE_TOP_RIGHT   6
-#define RESIZE_BOTTOM_LEFT 7
-#define RESIZE_BOTTOM_RIGHT 8
-
-#define RESIZE_BORDER 8  // Pixel width of resize border
 
 int compositor_check_resize_edge(comp_window_t *win, int mouse_x, int mouse_y) {
     if (!win || !win->active || !win->visible || win->maximized) {

@@ -300,6 +300,11 @@ void _start(void) {
                 if (ext2_dir_lookup(ext2_root_fs, EXT2_ROOT_INO, "kernel_installed") == 0) {
                     console_printf(" INSTALL: First boot detected. Installing system files to disk...\n");
                     
+                    // Create essential directories
+                    ext2_create(ext2_root_fs, EXT2_ROOT_INO, "dev", EXT2_S_IFDIR | 0755);
+                    ext2_create(ext2_root_fs, EXT2_ROOT_INO, "tmp", EXT2_S_IFDIR | 0755);
+                    ext2_create(ext2_root_fs, EXT2_ROOT_INO, "mnt", EXT2_S_IFDIR | 0755);
+                    
                     for (size_t i = 0; ; i++) {
                         vfs_node_t *node = vfs_readdir(vfs_root, i);
                         if (node == NULL) break;
@@ -338,14 +343,31 @@ void _start(void) {
                     console_printf(" INSTALL: Installation Complete.\n");
                 } else {
                     console_printf(" INSTALL: System already installed.\n");
+                    
+                    // Ensure /dev exists even if installed (repair)
+                    if (ext2_dir_lookup(ext2_root_fs, EXT2_ROOT_INO, "dev") == 0) {
+                        ext2_create(ext2_root_fs, EXT2_ROOT_INO, "dev", EXT2_S_IFDIR | 0755);
+                    }
                 }
+                
+                // BOOT FROM DISK
+                console_printf(" VFS: Switching root filesystem to /dev/sda1...\n");
+                vfs_root = ext2_get_root(ext2_root_fs);
+                
+                // Mount devfs
+                if (vfs_mount("/dev", devfs_get_root()) == 0) {
+                    console_printf(" VFS: Mounted devfs at /dev\n");
+                } else {
+                    console_printf(" VFS: Failed to mount devfs at /dev\n");
+                }
+                
             } else {
                  console_printf(" VFS: Failed to mount /disk\n");
             }
         }
 
-        // List files in initrd
-        console_printf("\n Files in initrd:\n");
+        // List files in initrd (now invalid if we switched root, but let's skip or list new root)
+        console_printf("\n Files in root (/%s):\n", vfs_root == ext2_get_root(ext2_root_fs) ? "sda1" : "initrd");
         for (size_t i = 0; ; i++) {
             vfs_node_t *node = vfs_readdir(vfs_root, i);
             if (node == NULL) break;
@@ -353,7 +375,7 @@ void _start(void) {
         }
         
         // Launch Service Manager
-        vfs_node_t *sm_node = initrd_find("service_manager.elf");
+        vfs_node_t *sm_node = vfs_finddir(vfs_root, "service_manager.elf");
         if (sm_node) {
             console_printf("[KERNEL] Found service_manager.elf, loading...\n");
             void *sm_data = kmalloc(sm_node->length);
