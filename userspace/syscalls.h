@@ -54,6 +54,8 @@
 #define SYS_IRQ_WAIT     66
 #define SYS_IRQ_ACK      67
 #define SYS_MAP_PHYS     68
+#define SYS_AIO_SUBMIT   69
+#define SYS_AIO_WAIT     70
 
 // IPC Constants
 #define IPC_PORT_FLAG_RECEIVE (1 << 1)

@@ -53,6 +53,7 @@ void serial_init(void) {
 }
 
 void serial_putc(char c) {
+    klog_putc(c); // Capture to ring buffer
     while (!serial_is_transmit_empty());
     outb(COM1_PORT, c);
 }

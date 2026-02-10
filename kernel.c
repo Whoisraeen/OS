@@ -37,11 +37,79 @@
 #include "klog.h"
 #include "ksyms.h"
 #include "elf.h"
+#include "aio.h"
 
 // Globals for drivers to access
 uint32_t *fb_ptr = NULL;
 uint64_t fb_width = 0;
 uint64_t fb_height = 0;
+
+static vfs_node_t *initrd_root_node = NULL;
+
+static void background_installer_task(void) {
+    if (!initrd_root_node || !ext2_root_fs) {
+        kprintf("[INSTALL] Background task: Missing initrd or disk!\n");
+        task_exit();
+        return;
+    }
+
+    kprintf("[INSTALL] Background Installation Started...\n");
+
+    // Re-scan initrd
+    for (size_t i = 0; ; i++) {
+        vfs_node_t *node = vfs_readdir(initrd_root_node, i);
+        if (node == NULL) break;
+
+        // Skip . and disk
+        if (strcmp(node->name, ".") == 0 || strcmp(node->name, "..") == 0 || strcmp(node->name, "disk") == 0) {
+            continue;
+        }
+        
+        // Skip critical files already installed
+        if (strcmp(node->name, "service_manager.elf") == 0 ||
+            strcmp(node->name, "compositor.elf") == 0 ||
+            strcmp(node->name, "panel.elf") == 0 ||
+            strcmp(node->name, "keyboard_driver.elf") == 0 ||
+            strcmp(node->name, "mouse_driver.elf") == 0 ||
+            strcmp(node->name, "init.elf") == 0) {
+            continue;
+        }
+
+        uint32_t parent_ino = EXT2_ROOT_INO;
+        int len = strlen(node->name);
+        
+        // Skip drivers (already installed)
+        if (len > 2 && strcmp(node->name + len - 2, ".o") == 0) {
+             continue;
+        }
+
+        // Check if file already exists on disk
+        if (ext2_dir_lookup(ext2_root_fs, parent_ino, node->name) != 0) {
+            continue;
+        }
+
+        uint8_t *buf = kmalloc(node->length);
+        if (buf) {
+            vfs_read(node, 0, node->length, buf);
+            
+            // Write to disk (blocks on AHCI interrupt)
+            uint32_t ino = ext2_create(ext2_root_fs, parent_ino, node->name, EXT2_S_IFREG | 0755);
+            if (ino) {
+                ext2_inode_t inode;
+                ext2_read_inode(ext2_root_fs, ino, &inode);
+                ext2_write_data(ext2_root_fs, ino, &inode, 0, node->length, buf);
+            }
+            kfree(buf);
+        }
+    }
+    
+    // Create marker file
+    ext2_create(ext2_root_fs, EXT2_ROOT_INO, "kernel_installed", EXT2_S_IFREG | 0644);
+    ext2_sync(ext2_root_fs);
+    kprintf("[INSTALL] Background Installation Complete.\n");
+    
+    task_exit();
+}
 
 // Helper to scan and load drivers from /disk/drivers
 static void load_drivers_from_disk(void) {
@@ -341,6 +409,9 @@ void _start(void) {
     // Initialize syscalls (MSRs)
     syscall_init();
 
+    // Initialize AIO
+    aio_init();
+
     kprintf("[KERNEL] fb_ptr=%p, width=%lu, height=%lu\n", fb_ptr, fb_width, fb_height);
 
     // Draw the "Sony Blue" background
@@ -351,6 +422,9 @@ void _start(void) {
         }
         kprintf("[KERNEL] Screen cleared.\n");
     }
+
+    // Initialize Kernel Log Buffer
+    klog_init();
 
     // Initialize graphical console
     console_init();
@@ -386,7 +460,7 @@ void _start(void) {
                 console_printf(" INSTALL: Checking installation...\n");
                 
                 // Check if already installed (look for kernel_installed marker)
-                if (ext2_dir_lookup(ext2_root_fs, EXT2_ROOT_INO, "kernel_installed") == 0) {
+                if (0) { // Disabled for now to fix boot hang
                     console_printf(" INSTALL: First boot detected. Installing system files to disk...\n");
                     
                     // Create essential directories
@@ -395,50 +469,69 @@ void _start(void) {
                     ext2_create(ext2_root_fs, EXT2_ROOT_INO, "mnt", EXT2_S_IFDIR | 0755);
                     ext2_create(ext2_root_fs, EXT2_ROOT_INO, "drivers", EXT2_S_IFDIR | 0755);
                     
-                    for (size_t i = 0; ; i++) {
-                        vfs_node_t *node = vfs_readdir(vfs_root, i);
-                        if (node == NULL) break;
-                        
-                        // Skip . and disk
-                        if (strcmp(node->name, ".") == 0 || strcmp(node->name, "..") == 0 || strcmp(node->name, "disk") == 0) {
-                            continue;
-                        }
-                        
-                        console_printf("   - Installing %s... ", node->name);
-                        
-                        uint32_t parent_ino = EXT2_ROOT_INO;
-                        // Put .o files in /drivers
-                        int len = strlen(node->name);
-                        if (len > 2 && strcmp(node->name + len - 2, ".o") == 0) {
-                            uint32_t drv_ino = ext2_dir_lookup(ext2_root_fs, EXT2_ROOT_INO, "drivers");
-                            if (drv_ino) parent_ino = drv_ino;
-                        }
-                        
-                        // Read file from Initrd
-                        uint8_t *buf = kmalloc(node->length);
-                        if (buf) {
-                            vfs_read(node, 0, node->length, buf);
-                            
-                            // Create on disk
-                            uint32_t ino = ext2_create(ext2_root_fs, parent_ino, node->name, EXT2_S_IFREG | 0755);
-                            if (ino) {
-                                ext2_inode_t inode;
-                                ext2_read_inode(ext2_root_fs, ino, &inode);
-                                ext2_write_data(ext2_root_fs, ino, &inode, 0, node->length, buf);
-                                console_printf("OK\n");
-                            } else {
-                                console_printf("FAILED (Create)\n");
-                            }
-                            kfree(buf);
-                        } else {
-                            console_printf("FAILED (OOM)\n");
+                    // 1. Install Critical Files Synchronously
+                    const char *critical_files[] = {
+                        "service_manager.elf",
+                        "compositor.elf",
+                        "panel.elf",
+                        "keyboard_driver.elf",
+                        "mouse_driver.elf",
+                        "init.elf",
+                        NULL
+                    };
+
+                    for (int i=0; critical_files[i]; i++) {
+                        vfs_node_t *node = vfs_finddir(vfs_root, critical_files[i]);
+                        if (node) {
+                             console_printf("   - %s... ", critical_files[i]);
+                             uint8_t *buf = kmalloc(node->length);
+                             if (buf) {
+                                 vfs_read(node, 0, node->length, buf);
+                                 uint32_t ino = ext2_create(ext2_root_fs, EXT2_ROOT_INO, critical_files[i], EXT2_S_IFREG | 0755);
+                                 if (ino) {
+                                     ext2_inode_t inode;
+                                     ext2_read_inode(ext2_root_fs, ino, &inode);
+                                     ext2_write_data(ext2_root_fs, ino, &inode, 0, node->length, buf);
+                                     console_printf("OK\n");
+                                 } else {
+                                     console_printf("FAIL\n");
+                                 }
+                                 kfree(buf);
+                             }
                         }
                     }
-                    
-                    // Create marker file
-                    ext2_create(ext2_root_fs, EXT2_ROOT_INO, "kernel_installed", EXT2_S_IFREG | 0644);
-                    ext2_sync(ext2_root_fs);
-                    console_printf(" INSTALL: Installation Complete.\n");
+
+                    // 2. Install Drivers Synchronously (so we can load them)
+                    for (size_t i = 0; ; i++) {
+                        vfs_node_t *node = vfs_readdir(vfs_root, i);
+                        if (!node) break;
+                        
+                        int len = strlen(node->name);
+                        if (len > 2 && strcmp(node->name + len - 2, ".o") == 0) {
+                            console_printf("   - Driver %s... ", node->name);
+                            uint32_t drv_dir = ext2_dir_lookup(ext2_root_fs, EXT2_ROOT_INO, "drivers");
+                            if (!drv_dir) drv_dir = EXT2_ROOT_INO;
+                            
+                             uint8_t *buf = kmalloc(node->length);
+                             if (buf) {
+                                 vfs_read(node, 0, node->length, buf);
+                                 uint32_t ino = ext2_create(ext2_root_fs, drv_dir, node->name, EXT2_S_IFREG | 0755);
+                                 if (ino) {
+                                     ext2_inode_t inode;
+                                     ext2_read_inode(ext2_root_fs, ino, &inode);
+                                     ext2_write_data(ext2_root_fs, ino, &inode, 0, node->length, buf);
+                                     console_printf("OK\n");
+                                 }
+                                 kfree(buf);
+                             }
+                        }
+                    }
+
+                    // 3. Spawn Background Task for the rest (apps, etc.)
+                    initrd_root_node = vfs_root; 
+                    task_create("installer", background_installer_task);
+                    console_printf(" INSTALL: Background installer started for remaining files.\n");
+
                 } else {
                     console_printf(" INSTALL: System already installed.\n");
                     
@@ -448,9 +541,11 @@ void _start(void) {
                     }
                 }
                 
+                if (0) { // Disabled for now to stay on initrd
                 // BOOT FROM DISK
                 console_printf(" VFS: Switching root filesystem to /dev/sda1...\n");
                 vfs_root = ext2_get_root(ext2_root_fs);
+                }
                 
                 // Mount devfs
                 if (vfs_mount("/dev", devfs_get_root()) == 0) {
@@ -476,14 +571,14 @@ void _start(void) {
         }
         
         // Launch Service Manager
-        vfs_node_t *sm_node = vfs_finddir(vfs_root, "service_manager.elf");
+        vfs_node_t *sm_node = vfs_finddir(vfs_root, "compositor.elf");
         if (sm_node) {
-            console_printf("[KERNEL] Found service_manager.elf, loading...\n");
+            console_printf("[KERNEL] Found compositor.elf, loading...\n");
             void *sm_data = kmalloc(sm_node->length);
             if (sm_data) {
                 vfs_read(sm_node, 0, sm_node->length, (uint8_t*)sm_data);
                 
-                int pid = task_create_user("service_manager", sm_data, sm_node->length);
+                int pid = task_create_user("compositor", sm_data, sm_node->length);
                 if (pid >= 0) {
                     console_printf("[KERNEL] Service Manager started (PID %d)\n", pid);
                 } else {

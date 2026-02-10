@@ -22,6 +22,7 @@
 #include "acpi.h"
 #include "driver.h"
 #include "ext2.h"
+#include "aio.h"
 
 // MSR registers
 #define MSR_EFER     0xC0000080
@@ -455,11 +456,18 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             if (!security_has_capability(current_pid, CAP_IPC_SEND)) {
                 return (uint64_t)-1;
             }
-            // Validate user message pointer
-            if (!is_user_address(arg2, 128)) {
+            // Validate user message pointer (header + data)
+            if (!is_user_address(arg2, 152)) {
                 return (uint64_t)-1;
             }
-            return (uint64_t)ipc_send_message((uint32_t)arg1, (void *)arg2, current_pid, (uint32_t)arg3, 0);
+            
+            // Safe copy from user
+            uint8_t kmsg[152];
+            if (copy_from_user(kmsg, (const void *)arg2, 152) < 0) {
+                return (uint64_t)-1;
+            }
+            
+            return (uint64_t)ipc_send_message((uint32_t)arg1, (void *)kmsg, current_pid, (uint32_t)arg3, 0);
         }
 
         case SYS_IPC_RECV: {
@@ -467,10 +475,22 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
                 return (uint64_t)-1;
             }
             // Validate user message buffer
-            if (!is_user_address(arg2, 128)) {
+            if (!is_user_address(arg2, 152)) {
                 return (uint64_t)-1;
             }
-            return (uint64_t)ipc_recv_message((uint32_t)arg1, (void *)arg2, current_pid, (uint32_t)arg3, 0);
+            
+            // We pass the user pointer directly to recv because it writes back?
+            // Wait, ipc_recv_message writes to the buffer.
+            // If we use a kernel buffer, we need to copy back.
+            
+            uint8_t kmsg[152];
+            // No need to copy *from* user for RECV, just *to* user.
+            
+            int ret = ipc_recv_message((uint32_t)arg1, (void *)kmsg, current_pid, (uint32_t)arg3, 0);
+            if (ret == 0) {
+                if (copy_to_user((void *)arg2, kmsg, 152) < 0) return (uint64_t)-1;
+            }
+            return (uint64_t)ret;
         }
 
         case SYS_IPC_LOOKUP: {
@@ -854,6 +874,30 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             if (vma) vma_insert(task->mm, vma);
             
             return virt;
+        }
+
+        case SYS_AIO_SUBMIT: {
+            // arg1 = aio_request_t *req
+            if (!is_user_address(arg1, sizeof(aio_request_t))) return (uint64_t)-1;
+            
+            // Copy request from user
+            aio_request_t req;
+            if (copy_from_user(&req, (const void *)arg1, sizeof(aio_request_t)) < 0) return (uint64_t)-1;
+            
+            return sys_aio_submit(&req);
+        }
+
+        case SYS_AIO_WAIT: {
+            // arg1 = aio_id, arg2 = aio_result_t *res
+            if (!is_user_address(arg2, sizeof(aio_result_t))) return (uint64_t)-1;
+            
+            aio_result_t res;
+            uint64_t ret = sys_aio_wait(arg1, &res);
+            
+            if (ret == 0) {
+                if (copy_to_user((void *)arg2, &res, sizeof(aio_result_t)) < 0) return (uint64_t)-1;
+            }
+            return ret;
         }
 
         default:

@@ -6,6 +6,7 @@
 #include "serial.h"
 #include "string.h"
 #include "io.h"
+#include "semaphore.h"
 
 // Helper to convert physical to virtual (HHDM)
 static inline void *p2v(uint64_t phys) {
@@ -17,6 +18,7 @@ static ahci_hba_mem_t *abar = NULL;
 static int active_port = -1;
 static ahci_cmd_header_t *cmd_header_virt[32];
 static ahci_cmd_table_t *cmd_table_virt[32];
+static semaphore_t port_sem[32];
 
 // Interrupt Synchronization
 static volatile int cmd_complete = 0;
@@ -44,6 +46,7 @@ void ahci_isr(void) {
         if (pis & (1 << 30)) { // TFES - Task File Error Status
             kprintf("[AHCI] ISR: Disk Error (IS=0x%x)\n", pis);
             cmd_complete = -1; // Error
+            sem_post(&port_sem[active_port]);
         } else if (pis & (1 << 5)) { // DPS - Descriptor Processed
              // This fires for every PRD. We want completion.
         }
@@ -51,6 +54,7 @@ void ahci_isr(void) {
         // We typically look for D2H Register FIS (bit 0) or Set Device Bits (bit 2)
         if (pis & ((1 << 0) | (1 << 2) | (1 << 5))) {
             cmd_complete = 1;
+            sem_post(&port_sem[active_port]);
         }
     }
 }
@@ -454,25 +458,16 @@ int ahci_write(uint64_t lba, uint32_t count, const uint8_t *buffer) {
     // Reset Completion Flag
     cmd_complete = 0;
     
+    // Ensure semaphore is zero
+    while(sem_try_wait(&port_sem[active_port])); 
+
     port->ci = (1 << slot);
 
-    int timeout = 10000000;
-    while (1) {
-        if (cmd_complete == 1) break;
-        if (cmd_complete == -1) return -1;
+    // Wait for interrupt (Blocking)
+    sem_wait(&port_sem[active_port]);
 
-        if ((port->ci & (1 << slot)) == 0) break;
-        if (port->is & (1 << 30)) {
-            kprintf("[AHCI] Write Error (IS=0x%x)\n", port->is);
-            return -1;
-        }
-        timeout--;
-        if (timeout == 0) {
-            kprintf("[AHCI] Write Timeout\n");
-            return -1;
-        }
-        __asm__ volatile("pause");
-    }
+    if (cmd_complete == -1) return -1;
+    if (port->is & (1 << 30)) return -1;
 
     return 0;
 }

@@ -28,7 +28,8 @@ SRCS = kernel.c gdt.c idt.c pic.c keyboard.c pmm.c vmm.c heap.c serial.c \
        mouse.c desktop.c speaker.c compositor.c elf.c ipc.c security.c \
        spinlock.c cpu.c lapic.c mutex.c semaphore.c fd.c pipe.c signal.c \
        futex.c vm_area.c acpi.c ioapic.c rtc.c driver.c pci.c dma.c \
-       devfs.c ahci.c bga.c block.c partition.c bcache.c ext2.c klog.c ksyms.c
+       devfs.c ahci.c bga.c block.c partition.c bcache.c ext2.c klog.c ksyms.c \
+       aio.c
 
 OBJS = $(SRCS:.c=.o) interrupts.o
 
@@ -79,7 +80,11 @@ initrd/test_driver.o: drivers/test_driver.c
 	mkdir -p initrd
 	$(CC) $(CFLAGS) -mcmodel=large -r -c drivers/test_driver.c -o initrd/test_driver.o
 
-initrd.tar: initrd/init.elf initrd/compositor.elf initrd/service_manager.elf initrd/keyboard_driver.elf initrd/mouse_driver.elf initrd/terminal.elf initrd/test_driver.o
+initrd/panel.elf: userspace/panel.c userspace/lib/gui.c userspace/linker.ld
+	mkdir -p initrd
+	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/panel.c userspace/lib/gui.c font.c -o initrd/panel.elf
+
+initrd.tar: initrd/init.elf initrd/compositor.elf initrd/service_manager.elf initrd/keyboard_driver.elf initrd/mouse_driver.elf initrd/terminal.elf initrd/panel.elf initrd/test_driver.o
 	tar -cvf initrd.tar -C initrd .
 
 $(ISO_IMAGE): $(KERNEL_BIN) limine initrd.tar

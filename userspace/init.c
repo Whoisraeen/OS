@@ -72,6 +72,11 @@ void _start(void) {
         syscall3(SYS_YIELD, 0, 0, 0);
     }
     
+    // Spawn Drivers & Panel
+    syscall1(SYS_PROC_EXEC, (long)"keyboard_driver.elf");
+    syscall1(SYS_PROC_EXEC, (long)"mouse_driver.elf");
+    syscall1(SYS_PROC_EXEC, (long)"panel.elf");
+
     if (comp_port > 0) {
         syscall3(SYS_WRITE, 1, (long)"[INIT] Compositor found, requesting window...\n", 46);
         

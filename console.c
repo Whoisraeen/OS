@@ -97,9 +97,10 @@ static void draw_char(char c, size_t x, size_t y) {
 }
 
 void console_putc(char c) {
-    // Mirror to serial
+    // Mirror to serial (which also klogs it)
     serial_putc(c);
 
+    // If console is disabled (GUI owns screen) or not initialized, stop here.
     if (fb_ptr == NULL || !console_enabled) return;
     
     if (c == '\n') {

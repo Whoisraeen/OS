@@ -38,23 +38,16 @@ void _start(void) {
          syscall3(SYS_WRITE, 1, (long)"[SM] Started Terminal.\n", 23);
     }
 
-    // 5. Loop forever, reaping zombies
+    // 5. Wait loop (Prevent exit)
     while (1) {
         int status;
         long pid = syscall1(SYS_WAIT, (long)&status);
         if (pid > 0) {
-            // A child exited
-            // In a real init, we might restart it
+            // Restart critical services
             if (pid == comp_pid) {
                 syscall3(SYS_WRITE, 1, (long)"[SM] Compositor died! Restarting...\n", 36);
                 comp_pid = syscall1(SYS_PROC_EXEC, (long)comp_path);
             }
-        } else {
-            // No children dead, sleep/yield
-            // We could use SYS_YIELD, but a blocking wait (if available) is better.
-            // SYS_WAIT blocks if children exist but none are dead.
-            // If no children exist, we might spin, so let's sleep.
-            // For now, SYS_WAIT blocks in our kernel implementation.
         }
     }
 }

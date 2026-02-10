@@ -662,7 +662,19 @@ void _start(void) {
     }
     
     fb_ptr = (uint32_t *)fb_info.addr;
-    back_buffer = fb_ptr; // Temporary: single buffering
+    
+    // Allocate Back Buffer (Double Buffering)
+    size_t fb_size = fb_info.width * fb_info.height * 4;
+    // We can try to use malloc if heap is large enough, or use SHMEM/mmap
+    // Our malloc heap is 1MB by default in u_stdlib.h which is too small for 1024x768x4 (~3MB).
+    // Let's create a private SHMEM region for backbuffer.
+    long bb_shmem = syscall2(SYS_IPC_SHMEM_CREATE, fb_size, 0);
+    if (bb_shmem > 0) {
+        back_buffer = (uint32_t *)syscall1(SYS_IPC_SHMEM_MAP, bb_shmem);
+    } else {
+        // Fallback to front buffer (flickering)
+        back_buffer = fb_ptr;
+    }
     
     // 2. Setup IPC
     long port = syscall1(SYS_IPC_CREATE, IPC_PORT_FLAG_RECEIVE);
@@ -745,6 +757,13 @@ void _start(void) {
             
             // Cursor
             draw_cursor(mouse_x, mouse_y);
+            
+            // Flip (Copy Back Buffer to Front Buffer)
+            if (back_buffer != fb_ptr) {
+                memcpy(fb_ptr, back_buffer, fb_info.width * fb_info.height * 4);
+            } else {
+                // Single buffering - nothing to flip
+            }
             
             dirty = 0;
         }
