@@ -4,20 +4,9 @@
 #include "u_stdlib.h"
 #include "lib/tls.h"
 
-static size_t strlen(const char *str) {
-    size_t len = 0;
-    while (str[len]) len++;
-    return len;
-}
+// Gemini Client for RaeenOS
+// Uses TLSe for mandatory encryption
 
-#define printf(...) do { char buf[128]; snprintf(buf, 128, __VA_ARGS__); syscall3(SYS_WRITE, 1, (long)buf, strlen(buf)); } while(0)
-
-// Simple Gemini Client (Skeleton)
-// Protocol: gemini://<host>[:port]/<path>
-// Default port: 1965
-// TLS is mandatory (Mocked for now)
-
-// Mock socket defines
 #define AF_INET 2
 #define SOCK_STREAM 1
 #define IPPROTO_TCP 6
@@ -27,66 +16,94 @@ typedef struct {
     uint16_t sin_port;
     uint32_t sin_addr;
     char sin_zero[8];
-} sockaddr_in;
+} sockaddr_in_t;
+
+// Helper to convert IP string to dword (simplified)
+static uint32_t inet_addr(const char *cp) {
+    uint32_t addr = 0;
+    uint32_t part = 0;
+    int shift = 0;
+    while (*cp) {
+        if (*cp == '.') {
+            addr |= (part << shift);
+            part = 0;
+            shift += 8;
+        } else {
+            part = part * 10 + (*cp - '0');
+        }
+        cp++;
+    }
+    addr |= (part << shift);
+    return addr;
+}
 
 void _start(void) {
-    // Hardcoded URL for test since no argv parsing yet in _start
-    char *url = "gemini://raeenos.org";
-    printf("Fetching %s...\n", url);
+    const char *url = "gemini://raeenos.org/";
+    const char *hostname = "raeenos.org";
+    const char *ip_str = "127.0.0.1"; // Default gateway/local test
     
-    // Parse URL (Simplified)
-    // Assume gemini://host/path format
-    // For now, we just hardcode connecting to a dummy IP
+    printf("RaeenOS Gemini CLI v1.0\n");
+    printf("Fetching: %s\n", url);
     
     // 1. Create Socket
-    int sockfd = syscall3(SYS_SOCKET, AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    int sockfd = (int)syscall3(SYS_SOCKET, AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sockfd < 0) {
-        printf("Error: Failed to create socket (Syscall not fully implemented?)\n");
-        // return; // Continue for demo purposes
+        printf("Error: Socket creation failed\n");
+        syscall1(SYS_EXIT, 1);
     }
     
     // 2. Connect
-    sockaddr_in addr;
+    sockaddr_in_t addr;
     addr.sin_family = AF_INET;
-    addr.sin_port = 1965; // Big endian?
-    addr.sin_addr = 0x0100007F; // 127.0.0.1
+    addr.sin_port = 1965; 
+    addr.sin_addr = inet_addr(ip_str);
     
-    int ret = syscall3(SYS_CONNECT, sockfd, (long)&addr, sizeof(addr));
+    printf("Connecting to %s:%d...\n", ip_str, addr.sin_port);
+    int ret = (int)syscall3(SYS_CONNECT, sockfd, (long)&addr, sizeof(addr));
+    
     if (ret < 0) {
-        printf("Error: Connection failed (Networking stack not ready)\n");
-    } else {
-        printf("Connected! Initializing TLS...\n");
-        
-        tls_ctx_t *tls = tls_create_context();
-        if (tls_connect(tls, sockfd, "raeenos.org") < 0) {
-             printf("TLS Handshake failed\n");
-        } else {
-            // 3. Send Request
-            // <URL><CR><LF>
-            char req[256];
-            // strcpy(req, url); ...
-            req[0] = '\r'; req[1] = '\n'; req[2] = 0;
-            
-            tls_write(tls, req, 2);
-            
-            // 4. Receive Response
-            char buf[1024];
-            int n = tls_read(tls, buf, 1024);
-            if (n > 0) {
-                buf[n] = 0;
-                printf("%s\n", buf);
-            }
-        }
-        tls_destroy_context(tls);
+        printf("Error: Connection failed\n");
+        syscall1(SYS_EXIT, 1);
     }
     
-    // Fallback Demo Output
-    printf("\n[DEMO] Gemini Response:\n");
-    printf("20 text/gemini\r\n");
-    printf("# Welcome to RaeenOS Gemini Capsule\n");
-    printf("This is a placeholder response until the TCP/IP stack is fully online.\n");
-    printf("\n");
-    printf("=> gemini://raeenos.org Project Homepage\n");
+    printf("Connected. Performing TLS handshake...\n");
     
+    // 3. TLS Handshake
+    tls_ctx_t *tls = tls_create_context();
+    if (!tls) {
+        printf("Error: TLS context allocation failed\n");
+        syscall1(SYS_EXIT, 1);
+    }
+    
+    if (tls_connect(tls, sockfd, hostname) < 0) {
+        printf("Error: TLS handshake failed\n");
+        tls_destroy_context(tls);
+        syscall1(SYS_EXIT, 1);
+    }
+    
+    printf("TLS established. Sending request...\n");
+    
+    // 4. Send Gemini Request
+    // Format: <URL>\r\n
+    char request[512];
+    int req_len = snprintf(request, sizeof(request), "%s\r\n", url);
+    tls_write(tls, request, req_len);
+    
+    // 5. Read Response
+    printf("--- Response ---\n");
+    char buffer[2048];
+    int bytes;
+    while ((bytes = tls_read(tls, buffer, sizeof(buffer) - 1)) > 0) {
+        buffer[bytes] = '\0';
+        printf("%s", buffer);
+    }
+    printf("\n----------------\n");
+    
+    // 6. Cleanup
+    tls_close(tls);
+    tls_destroy_context(tls);
+    syscall1(SYS_CLOSE, sockfd);
+    
+    printf("Done.\n");
     syscall1(SYS_EXIT, 0);
 }

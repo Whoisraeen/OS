@@ -17,15 +17,7 @@ typedef struct {
 } ipc_message_t;
 
 
-static inline void *memset(void *s, int c, size_t n) {
-    unsigned char *p = s;
-    while (n--) *p++ = (unsigned char)c;
-    return s;
-}
-static inline void strncpy(char *dest, const char *src, int n) {
-    for (int i = 0; i < n && src[i]; i++) dest[i] = src[i];
-    dest[n-1] = 0;
-}
+// Utils moved to u_stdlib.h
 
 // Helper to draw text to buffer
 static void draw_char(uint32_t *buffer, int width, int x, int y, char c, uint32_t color) {

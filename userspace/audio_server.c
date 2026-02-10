@@ -3,11 +3,7 @@
 #include "syscalls.h"
 #include "u_stdlib.h"
 
-static size_t strlen(const char *str) {
-    size_t len = 0;
-    while (str[len]) len++;
-    return len;
-}
+// Utils moved to u_stdlib.h
 
 static int _getpid(void) {
     return syscall0(SYS_GETPID);

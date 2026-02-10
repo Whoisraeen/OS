@@ -97,8 +97,9 @@ static void draw_char(char c, size_t x, size_t y) {
 }
 
 void console_putc(char c) {
-    // Mirror to serial (which also klogs it)
-    serial_putc(c);
+    // NOTE: serial_putc is NOT called here. Callers that need serial output
+    // (kprintf, console_dev_write) call serial_putc explicitly.
+    // This prevents double serial output.
 
     // If console is disabled (GUI owns screen) or not initialized, stop here.
     if (fb_ptr == NULL || !console_enabled) return;

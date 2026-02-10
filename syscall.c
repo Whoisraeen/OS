@@ -44,10 +44,35 @@ typedef struct {
     char sin_zero[8];
 } sockaddr_in_t;
 
+// Callback for TCP receive
+static err_t tcp_recv_cb(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err) {
+    (void)err;
+    socket_t *sock = (socket_t *)arg;
+    if (!sock || !p) return 0;
+
+    // Copy data into socket ring buffer
+    uint8_t *data = (uint8_t *)p->payload;
+    for (uint16_t i = 0; i < p->len; i++) {
+        int next_tail = (sock->recv_tail + 1) % 1024;
+        if (next_tail != sock->recv_head) { // Not full
+            sock->recv_buf[sock->recv_tail] = data[i];
+            sock->recv_tail = next_tail;
+        }
+    }
+
+    pbuf_free(p);
+    return 0;
+}
+
 // Callback for TCP connection
 static err_t tcp_connected_cb(void *arg, struct tcp_pcb *pcb, err_t err) {
-    (void)arg; (void)pcb; (void)err;
-    // In a real system, we would wake up the waiting process
+    (void)err;
+    socket_t *sock = (socket_t *)arg;
+    if (sock) {
+        sock->state = 1; // Connected
+        pcb->recv = tcp_recv_cb;
+        pcb->callback_arg = sock;
+    }
     return 0;
 }
 
@@ -985,6 +1010,7 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
 
             kprintf("[SYSCALL] connect to %08x:%d\n", addr.sin_addr, addr.sin_port);
             tcp_connect(sock->pcb, addr.sin_addr, addr.sin_port, tcp_connected_cb);
+            sock->pcb->callback_arg = sock; // Ensure arg is set
             
             return 0;
         }
@@ -1008,7 +1034,7 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
                 return (uint64_t)-1;
             }
 
-            tcp_write(sock->pcb, kbuf, arg3, 0);
+            tcp_write(sock->pcb, kbuf, (uint16_t)arg3, 0);
             kfree(kbuf);
             return arg3;
         }
@@ -1018,12 +1044,24 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             task_t *current_task = task_get_by_id(current_pid);
             if (!current_task) return (uint64_t)-1;
 
-            fd_table_t *table = current_task->fd_table;
-            fd_entry_t *entry = fd_get(table, (int)arg1);
+            fd_entry_t *entry = fd_get(current_task->fd_table, (int)arg1);
             if (!entry || entry->type != FD_SOCKET) return (uint64_t)-1;
             
-            // Mock recv: return 0
-            return 0;
+            socket_t *sock = (socket_t *)entry->socket;
+            if (!sock) return (uint64_t)-1;
+
+            size_t bytes_read = 0;
+            uint8_t *ubuf = (uint8_t *)arg2;
+
+            while (bytes_read < arg3 && sock->recv_head != sock->recv_tail) {
+                uint8_t c = (uint8_t)sock->recv_buf[sock->recv_head];
+                if (copy_to_user(&ubuf[bytes_read], &c, 1) < 0) break;
+                
+                sock->recv_head = (sock->recv_head + 1) % 1024;
+                bytes_read++;
+            }
+
+            return (uint64_t)bytes_read;
         }
         
         case SYS_BIND:

@@ -153,9 +153,9 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
 
         // User-mode page fault: terminate the task
         if (frame->cs & 3) {
-            kprintf("\n[PAGE FAULT] User process fault — terminating task %u\n",
-                    task_current_id());
-            kprintf("Addr: 0x%lx, IP: 0x%lx\n", faulting_addr, frame->rip);
+            console_set_enabled(1);
+            kprintf("\n[PAGE FAULT] User task %u killed — Addr: 0x%lx, IP: 0x%lx, Err: 0x%lx\n",
+                    task_current_id(), faulting_addr, frame->rip, frame->err_code);
             task_exit();
             return (uint64_t)frame;
         }
@@ -182,7 +182,8 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
         
         // User-mode exception: terminate the task
         if (frame->cs & 3) {
-            kprintf("\n[EXCEPTION] %s (0x%lx) at 0x%lx — terminating task %u\n",
+            console_set_enabled(1);
+            kprintf("\n[EXCEPTION] %s (0x%lx) at 0x%lx — task %u killed\n",
                     name, frame->int_no, frame->rip, task_current_id());
             task_exit();
             return (uint64_t)frame;

@@ -78,7 +78,15 @@ static int check_type(ahci_port_regs_t *port) {
 
 // Start command engine
 static void start_cmd(ahci_port_regs_t *port) {
-    while (port->cmd & AHCI_CMD_CR); // Wait until CR is clear
+    // Wait until CR is clear (with timeout)
+    int limit = 1000000;
+    while ((port->cmd & AHCI_CMD_CR) && limit > 0) {
+        limit--;
+        __asm__ volatile("pause");
+    }
+    if (limit == 0) {
+        kprintf("[AHCI] Warning: start_cmd: CR stuck (CMD=0x%x)\n", port->cmd);
+    }
 
     port->cmd |= AHCI_CMD_FRE; // Set FRE
     port->cmd |= AHCI_CMD_ST;  // Set ST
@@ -201,6 +209,9 @@ static void port_configure(int port_no) {
 
     cmd_table_virt[port_no] = (ahci_cmd_table_t *)p2v(ct_phys);
     memset(cmd_table_virt[port_no], 0, sizeof(ahci_cmd_table_t));
+
+    // Initialize semaphore for this port (count=0, ISR will post)
+    sem_init(&port_sem[port_no], 0);
 
     // Start command engine
     start_cmd(port);
@@ -372,34 +383,32 @@ int ahci_read(uint64_t lba, uint32_t count, uint8_t *buffer) {
     
     // Reset Completion Flag
     cmd_complete = 0;
-    
+
+    // Drain any stale semaphore counts
+    while (sem_try_wait(&port_sem[active_port]));
+
     port->ci = (1 << slot);
 
-    // Wait for interrupt (or timeout)
-    // In a real OS, we would sleep the thread.
-    // For now, we busy-wait but check the flag set by ISR.
-    // We also keep checking the hardware for redundancy/safety.
-    
-    int timeout = 10000000; // Increase timeout for slower I/O
+    // Wait for interrupt (or timeout via polling fallback)
+    // Try semaphore-based wait first, fall back to polling if MSI failed
+    int timeout = 10000000;
     while (1) {
-        if (cmd_complete == 1) break; // ISR signaled completion
-        if (cmd_complete == -1) return -1; // ISR signaled error
-        
-        // Fallback: Check hardware directly if ISR missed or MSI failed
-        if ((port->ci & (1 << slot)) == 0) break; 
+        if (cmd_complete == 1) break;
+        if (cmd_complete == -1) return -1;
+
+        // Check hardware directly (fallback if MSI failed)
+        if ((port->ci & (1 << slot)) == 0) break;
         if (port->is & (1 << 30)) {
             kprintf("[AHCI] Read Error (IS=0x%x)\n", port->is);
             return -1;
         }
-        
+
         timeout--;
         if (timeout == 0) {
             kprintf("[AHCI] Read Timeout (cmd_complete=%d, ci=0x%x, is=0x%x)\n", cmd_complete, port->ci, port->is);
             return -1;
         }
-        
-        // Yield CPU to allow other interrupts to fire if needed
-        // (Though in our kernel, interrupts fire anyway)
+
         __asm__ volatile("pause");
     }
 

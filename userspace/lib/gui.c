@@ -5,33 +5,7 @@
 #include "../u_stdlib.h"
 #include "../font.h" // We assume font.h is available in include path
 
-static size_t strlen(const char *str) {
-    size_t len = 0;
-    while (str[len]) len++;
-    return len;
-}
-
-static void *memset(void *s, int c, size_t n) {
-    unsigned char *p = s;
-    while (n--) *p++ = (unsigned char)c;
-    return s;
-}
-
-static void *memcpy(void *dest, const void *src, size_t n) {
-    char *d = dest;
-    const char *s = src;
-    while (n--) *d++ = *s++;
-    return dest;
-}
-
-static char *strncpy(char *dest, const char *src, size_t n) {
-    size_t i;
-    for (i = 0; i < n && src[i] != '\0'; i++)
-        dest[i] = src[i];
-    for ( ; i < n; i++)
-        dest[i] = '\0';
-    return dest;
-}
+// Utils moved to u_stdlib.h
 
 // IPC Structs
 typedef struct {

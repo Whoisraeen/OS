@@ -183,28 +183,25 @@ sys_thread_t sys_thread_new(const char *name, void (*thread)(void *arg), void *a
 // Network Interface (ethernetif)
 // ============================================================================
 
+#include "lwip/arp.h"
+#include "lwip/eth.h"
+#include "lwip/endian.h"
+
 // Called by E1000 ISR callback
 void ethernetif_input(const void *data, uint16_t len) {
-    // 1. Allocate pbuf
-    struct pbuf *p = pbuf_alloc(PBUF_RAW, len, PBUF_POOL);
-    if (!p) {
-        kprintf("[LWIP] Failed to allocate pbuf for RX\n");
-        return;
+    if (len < sizeof(eth_hdr_t)) return;
+    
+    eth_hdr_t *eth = (eth_hdr_t *)data;
+    uint16_t type = ntohs(eth->type);
+    
+    if (type == ETHTYPE_ARP) {
+        arp_input((uint8_t*)data + sizeof(eth_hdr_t), len - sizeof(eth_hdr_t));
+    } else if (type == ETHTYPE_IP) {
+        // Pass to IP layer (TODO: implement ip_input)
+        kprintf("[LWIP] Received IP packet (%d bytes)\n", len);
+    } else {
+        // kprintf("[LWIP] Unknown eth type: 0x%x\n", type);
     }
-    
-    // 2. Copy data
-    memcpy(p->payload, data, len);
-    
-    // 3. Pass to tcpip_thread via mailbox (simulated)
-    // In real lwIP: netif->input(p, netif);
-    // Since we don't have the netif struct initialized with a callback, we'll just log it.
-    kprintf("[LWIP] RX %d bytes -> pbuf %p\n", len, p);
-    
-    // If we had the stack:
-    // tcpip_input(p, &e1000_netif);
-    
-    // For now, free it to avoid leak
-    pbuf_free(p);
 }
 
 // Called by lwIP to send packet

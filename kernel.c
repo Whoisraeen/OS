@@ -623,7 +623,9 @@ void _start(void) {
     
     // Initialize mouse
     mouse_init();
-    
+
+    kprintf("[KERNEL] All initialization complete. Entering idle loop.\n");
+
     // Main Loop (Kernel Idle)
     for (;;) {
         __asm__ volatile("hlt");

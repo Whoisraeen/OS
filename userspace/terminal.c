@@ -15,43 +15,8 @@ typedef struct {
 // ============================================================================
 // Utils
 // ============================================================================
+// Utils moved to u_stdlib.h
 
-static inline void *memset(void *s, int c, size_t n) {
-    unsigned char *p = s;
-    while (n--) *p++ = (unsigned char)c;
-    return s;
-}
-
-static inline void *memcpy(void *dest, const void *src, size_t n) {
-    char *d = dest;
-    const char *s = src;
-    while (n--) *d++ = *s++;
-    return dest;
-}
-
-static inline size_t strlen(const char *str) {
-    size_t len = 0;
-    while (str[len]) len++;
-    return len;
-}
-
-static inline int strcmp(const char *s1, const char *s2) {
-    while (*s1 && *s1 == *s2) {
-        s1++;
-        s2++;
-    }
-    return *(const unsigned char *)s1 - *(const unsigned char *)s2;
-}
-
-static inline int strncmp(const char *s1, const char *s2, size_t n) {
-    while (n && *s1 && *s1 == *s2) {
-        s1++;
-        s2++;
-        n--;
-    }
-    if (n == 0) return 0;
-    return *(const unsigned char *)s1 - *(const unsigned char *)s2;
-}
 
 // ============================================================================
 // GUI Definitions
@@ -190,8 +155,11 @@ static void handle_csi(char c) {
             if (code == 0) {
                 current_fg = FG_COLOR;
                 current_bg = BG_COLOR;
+            } else if (code == 1) {
+                // Bold/Bright (just force white for now)
+                current_fg = 0xFFFFFFFF;
             } else if (code >= 30 && code <= 37) {
-                // Basic Colors
+                // Basic Foreground Colors
                 uint32_t colors[] = {
                     0xFF000000, // Black
                     0xFFFF0000, // Red
@@ -203,8 +171,19 @@ static void handle_csi(char c) {
                     0xFFFFFFFF  // White
                 };
                 current_fg = colors[code - 30];
-            } else if (code == 1) {
-                // Bold (Bright) - ignore for now or implement
+            } else if (code >= 40 && code <= 47) {
+                // Basic Background Colors
+                uint32_t colors[] = {
+                    0xFF000000, // Black
+                    0xFFFF0000, // Red
+                    0xFF00FF00, // Green
+                    0xFFFFFF00, // Yellow
+                    0xFF0000FF, // Blue
+                    0xFFFF00FF, // Magenta
+                    0xFF00FFFF, // Cyan
+                    0xFFFFFFFF  // White
+                };
+                current_bg = colors[code - 40];
             }
         }
         term_state = STATE_NORMAL;
@@ -219,6 +198,59 @@ static void handle_csi(char c) {
              cursor_row = 0;
              cursor_col = 0;
         }
+        term_state = STATE_NORMAL;
+    } else if (c == 'K') {
+        // Erase Line
+        // 0 (default) = cursor to end, 1 = start to cursor, 2 = all
+        int mode = term_params[0];
+        if (mode == 0) {
+            for (int col = cursor_col; col < COLS; col++) {
+                text_buffer[cursor_row][col] = 0;
+                color_buffer[cursor_row][col] = current_fg;
+            }
+        } else if (mode == 1) {
+             for (int col = 0; col <= cursor_col; col++) {
+                text_buffer[cursor_row][col] = 0;
+                color_buffer[cursor_row][col] = current_fg;
+            }
+        } else if (mode == 2) {
+             for (int col = 0; col < COLS; col++) {
+                text_buffer[cursor_row][col] = 0;
+                color_buffer[cursor_row][col] = current_fg;
+            }
+        }
+        term_state = STATE_NORMAL;
+    } else if (c == 'A') { // Cursor Up
+        int n = term_params[0]; if (n == 0) n = 1;
+        cursor_row -= n;
+        if (cursor_row < 0) cursor_row = 0;
+        term_state = STATE_NORMAL;
+    } else if (c == 'B') { // Cursor Down
+        int n = term_params[0]; if (n == 0) n = 1;
+        cursor_row += n;
+        if (cursor_row >= ROWS) cursor_row = ROWS - 1;
+        term_state = STATE_NORMAL;
+    } else if (c == 'C') { // Cursor Right
+        int n = term_params[0]; if (n == 0) n = 1;
+        cursor_col += n;
+        if (cursor_col >= COLS) cursor_col = COLS - 1;
+        term_state = STATE_NORMAL;
+    } else if (c == 'D') { // Cursor Left
+        int n = term_params[0]; if (n == 0) n = 1;
+        cursor_col -= n;
+        if (cursor_col < 0) cursor_col = 0;
+        term_state = STATE_NORMAL;
+    } else if (c == 'H' || c == 'f') { // Cursor Position
+        int row = term_params[0];
+        int col = term_params[1];
+        if (row > 0) row--; // 1-based to 0-based
+        if (col > 0) col--;
+        
+        if (row >= ROWS) row = ROWS - 1;
+        if (col >= COLS) col = COLS - 1;
+        
+        cursor_row = row;
+        cursor_col = col;
         term_state = STATE_NORMAL;
     } else {
         // Unknown or unsupported
