@@ -364,6 +364,14 @@ void _start(void) {
     // Initialize AHCI Storage
     ahci_init();
 
+    // Initialize E1000 Network Driver
+    e1000_init();
+    
+    // Initialize lwIP Network Interface (Adapter)
+    // We pass NULL for now as we don't have the full lwIP stack initialized
+    void ethernetif_init(void *netif); // Forward decl
+    ethernetif_init(NULL);
+
     // Initialize BGA Graphics (if available)
     bga_init();
 

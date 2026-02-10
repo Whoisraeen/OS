@@ -95,12 +95,24 @@ typedef struct {
 
 // State
 static char text_buffer[ROWS][COLS];
+static uint32_t color_buffer[ROWS][COLS];
 static int cursor_row = 0;
 static int cursor_col = 0;
 static uint32_t *win_buffer = NULL;
 static long comp_port = 0;
 static char cmd_buffer[256];
 static int cmd_len = 0;
+
+// ANSI State
+#define STATE_NORMAL 0
+#define STATE_ESC    1
+#define STATE_CSI    2
+
+static int term_state = STATE_NORMAL;
+static int term_params[4];
+static int term_param_count = 0;
+static uint32_t current_fg = FG_COLOR;
+static uint32_t current_bg = BG_COLOR;
 
 // ============================================================================
 // Drawing
@@ -135,7 +147,9 @@ static void render_console() {
         for (int c = 0; c < COLS; c++) {
             char ch = text_buffer[r][c];
             if (ch != 0) {
-                draw_char_pixel(c * FONT_WIDTH, r * FONT_HEIGHT, ch, FG_COLOR);
+                uint32_t color = color_buffer[r][c];
+                if (color == 0) color = FG_COLOR; // Default
+                draw_char_pixel(c * FONT_WIDTH, r * FONT_HEIGHT, ch, color);
             }
         }
     }
@@ -145,42 +159,115 @@ static void render_console() {
     int cy = cursor_row * FONT_HEIGHT;
     for (int r = 0; r < FONT_HEIGHT; r++) {
         for (int c = 0; c < FONT_WIDTH; c++) {
-            put_pixel(cx + c, cy + r, FG_COLOR);
+            put_pixel(cx + c, cy + r, current_fg);
         }
     }
 }
 
-static void terminal_putc(char c) {
-    if (c == '\n') {
-        cursor_col = 0;
-        cursor_row++;
-    } else if (c == '\b') {
-        if (cursor_col > 0) {
-            cursor_col--;
-            text_buffer[cursor_row][cursor_col] = 0;
-        } else if (cursor_row > 0) {
-            cursor_row--;
-            cursor_col = COLS - 1;
-            text_buffer[cursor_row][cursor_col] = 0;
+static void scroll_up() {
+    for (int r = 0; r < ROWS - 1; r++) {
+        for (int c = 0; c < COLS; c++) {
+            text_buffer[r][c] = text_buffer[r+1][c];
+            color_buffer[r][c] = color_buffer[r+1][c];
         }
+    }
+    for (int c = 0; c < COLS; c++) {
+        text_buffer[ROWS-1][c] = 0;
+        color_buffer[ROWS-1][c] = current_fg;
+    }
+    cursor_row = ROWS - 1;
+}
+
+static void handle_csi(char c) {
+    if (c >= '0' && c <= '9') {
+        term_params[term_param_count] = term_params[term_param_count] * 10 + (c - '0');
+    } else if (c == ';') {
+        if (term_param_count < 3) term_param_count++;
+    } else if (c == 'm') {
+        // SGR - Select Graphic Rendition
+        for (int i = 0; i <= term_param_count; i++) {
+            int code = term_params[i];
+            if (code == 0) {
+                current_fg = FG_COLOR;
+                current_bg = BG_COLOR;
+            } else if (code >= 30 && code <= 37) {
+                // Basic Colors
+                uint32_t colors[] = {
+                    0xFF000000, // Black
+                    0xFFFF0000, // Red
+                    0xFF00FF00, // Green
+                    0xFFFFFF00, // Yellow
+                    0xFF0000FF, // Blue
+                    0xFFFF00FF, // Magenta
+                    0xFF00FFFF, // Cyan
+                    0xFFFFFFFF  // White
+                };
+                current_fg = colors[code - 30];
+            } else if (code == 1) {
+                // Bold (Bright) - ignore for now or implement
+            }
+        }
+        term_state = STATE_NORMAL;
+    } else if (c == 'J') {
+        // Clear screen
+        if (term_params[0] == 2) {
+             for(int r=0; r<ROWS; r++) 
+                for(int col=0; col<COLS; col++) {
+                    text_buffer[r][col] = 0;
+                    color_buffer[r][col] = current_fg;
+                }
+             cursor_row = 0;
+             cursor_col = 0;
+        }
+        term_state = STATE_NORMAL;
     } else {
-        text_buffer[cursor_row][cursor_col] = c;
-        cursor_col++;
-        if (cursor_col >= COLS) {
+        // Unknown or unsupported
+        term_state = STATE_NORMAL;
+    }
+}
+
+static void terminal_putc(char c) {
+    if (term_state == STATE_NORMAL) {
+        if (c == '\033') {
+            term_state = STATE_ESC;
+        } else if (c == '\n') {
             cursor_col = 0;
             cursor_row++;
+        } else if (c == '\b') {
+            if (cursor_col > 0) {
+                cursor_col--;
+                text_buffer[cursor_row][cursor_col] = 0;
+            } else if (cursor_row > 0) {
+                cursor_row--;
+                cursor_col = COLS - 1;
+                text_buffer[cursor_row][cursor_col] = 0;
+            }
+        } else {
+            text_buffer[cursor_row][cursor_col] = c;
+            color_buffer[cursor_row][cursor_col] = current_fg;
+            cursor_col++;
+            if (cursor_col >= COLS) {
+                cursor_col = 0;
+                cursor_row++;
+            }
         }
+    } else if (term_state == STATE_ESC) {
+        if (c == '[') {
+            term_state = STATE_CSI;
+            term_param_count = 0;
+            term_params[0] = 0;
+            term_params[1] = 0;
+            term_params[2] = 0;
+            term_params[3] = 0;
+        } else {
+            term_state = STATE_NORMAL;
+        }
+    } else if (term_state == STATE_CSI) {
+        handle_csi(c);
     }
     
     if (cursor_row >= ROWS) {
-        // Scroll
-        for (int r = 0; r < ROWS - 1; r++) {
-            for (int c = 0; c < COLS; c++) {
-                text_buffer[r][c] = text_buffer[r+1][c];
-            }
-        }
-        for (int c = 0; c < COLS; c++) text_buffer[ROWS-1][c] = 0;
-        cursor_row = ROWS - 1;
+        scroll_up();
     }
 }
 

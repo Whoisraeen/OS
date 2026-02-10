@@ -12,16 +12,30 @@
 
 // Since we are running in kernel for now, we map lwIP primitives to kernel primitives
 
+#include "net/lwip_mock.h"
 #include "semaphore.h"
 #include "sched.h"
 #include "ipc.h"
+#include "heap.h"
+#include "spinlock.h"
 
 // Defines expected by lwIP
-typedef int8_t err_t;
 typedef semaphore_t sys_sem_t;
 typedef semaphore_t sys_mutex_t;
-typedef struct { int id; } sys_mbox_t; // Placeholder
 typedef int sys_thread_t;
+
+// Mailbox implementation
+#define MBOX_SIZE 128
+typedef struct {
+    void *msgs[MBOX_SIZE];
+    int head;
+    int tail;
+    int count;
+    semaphore_t not_empty;
+    semaphore_t not_full;
+    spinlock_t lock;
+    int valid;
+} sys_mbox_t;
 
 void sys_init(void) {
     // Initialized by kernel
@@ -30,11 +44,11 @@ void sys_init(void) {
 // Semaphores
 err_t sys_sem_new(sys_sem_t *sem, uint8_t count) {
     sem_init(sem, count);
-    return 0; // ERR_OK
+    return ERR_OK;
 }
 
 void sys_sem_free(sys_sem_t *sem) {
-    // No-op for now (no destroy fn in semaphore.h)
+    (void)sem;
 }
 
 void sys_sem_signal(sys_sem_t *sem) {
@@ -42,15 +56,16 @@ void sys_sem_signal(sys_sem_t *sem) {
 }
 
 uint32_t sys_arch_sem_wait(sys_sem_t *sem, uint32_t timeout) {
-    // TODO: Implement timeout
+    // TODO: Implement timeout support in kernel semaphores
+    (void)timeout;
     sem_wait(sem);
     return 0; // time waited
 }
 
-// Mutexes (using semaphores for now)
+// Mutexes
 err_t sys_mutex_new(sys_mutex_t *mutex) {
     sem_init(mutex, 1);
-    return 0;
+    return ERR_OK;
 }
 
 void sys_mutex_lock(sys_mutex_t *mutex) {
@@ -61,35 +76,180 @@ void sys_mutex_unlock(sys_mutex_t *mutex) {
     sem_post(mutex);
 }
 
+// Mailboxes
+err_t sys_mbox_new(sys_mbox_t *mbox, int size) {
+    if (size > MBOX_SIZE) size = MBOX_SIZE;
+    
+    mbox->head = 0;
+    mbox->tail = 0;
+    mbox->count = 0;
+    mbox->valid = 1;
+    
+    sem_init(&mbox->not_empty, 0);
+    sem_init(&mbox->not_full, size);
+    spinlock_init(&mbox->lock);
+    
+    return ERR_OK;
+}
+
+void sys_mbox_free(sys_mbox_t *mbox) {
+    mbox->valid = 0;
+}
+
+void sys_mbox_post(sys_mbox_t *mbox, void *msg) {
+    if (!mbox || !mbox->valid) return;
+    
+    sem_wait(&mbox->not_full);
+    
+    spinlock_acquire(&mbox->lock);
+    mbox->msgs[mbox->tail] = msg;
+    mbox->tail = (mbox->tail + 1) % MBOX_SIZE;
+    mbox->count++;
+    spinlock_release(&mbox->lock);
+    
+    sem_post(&mbox->not_empty);
+}
+
+err_t sys_mbox_trypost(sys_mbox_t *mbox, void *msg) {
+    if (!mbox || !mbox->valid) return ERR_BUF;
+    
+    spinlock_acquire(&mbox->lock);
+    if (mbox->count >= MBOX_SIZE) {
+        spinlock_release(&mbox->lock);
+        return ERR_MEM;
+    }
+    
+    mbox->msgs[mbox->tail] = msg;
+    mbox->tail = (mbox->tail + 1) % MBOX_SIZE;
+    mbox->count++;
+    spinlock_release(&mbox->lock);
+    
+    sem_post(&mbox->not_empty);
+    return ERR_OK;
+}
+
+uint32_t sys_arch_mbox_fetch(sys_mbox_t *mbox, void **msg, uint32_t timeout) {
+    if (!mbox || !mbox->valid) return 0;
+    
+    // TODO: Timeout
+    (void)timeout;
+    sem_wait(&mbox->not_empty);
+    
+    spinlock_acquire(&mbox->lock);
+    if (msg) {
+        *msg = mbox->msgs[mbox->head];
+    }
+    mbox->head = (mbox->head + 1) % MBOX_SIZE;
+    mbox->count--;
+    spinlock_release(&mbox->lock);
+    
+    sem_post(&mbox->not_full);
+    return 0;
+}
+
+uint32_t sys_arch_mbox_tryfetch(sys_mbox_t *mbox, void **msg) {
+     if (!mbox || !mbox->valid) return 0; // Should be sys_arch_mbox_tryfetch return type... usually u32
+     
+     spinlock_acquire(&mbox->lock);
+     if (mbox->count == 0) {
+         spinlock_release(&mbox->lock);
+         return 0xFFFFFFFF; // SYS_MBOX_EMPTY
+     }
+     
+     if (msg) {
+        *msg = mbox->msgs[mbox->head];
+     }
+     mbox->head = (mbox->head + 1) % MBOX_SIZE;
+     mbox->count--;
+     spinlock_release(&mbox->lock);
+     
+     sem_post(&mbox->not_full);
+     return 0;
+}
+
 // Threads
+// Wrapper to handle argument passing if we can't change task_create yet
+// For now, we'll store the arg in a global if it's single threaded, 
+// or we just assume the thread function doesn't need it for the main tcpip thread if it's global.
+// BUT, better to fix task_create. For now, a stub.
 sys_thread_t sys_thread_new(const char *name, void (*thread)(void *arg), void *arg, int stacksize, int prio) {
-    // Kernel task_create only takes void(*)(void)
-    // We need a wrapper to pass arg. For now, ignore arg or fix sched.c
+    (void)arg; (void)stacksize; (void)prio;
+    // Warning: arg is dropped!
     return task_create(name, (void(*)(void))thread);
+}
+
+// Mock PBUF allocation for now (since we don't have lwIP core)
+struct pbuf *pbuf_alloc(int layer, uint16_t length, int type) {
+    (void)layer; (void)type;
+    struct pbuf *p = kmalloc(sizeof(struct pbuf));
+    if (!p) return NULL;
+    
+    p->next = NULL;
+    p->payload = kmalloc(length);
+    p->len = length;
+    p->tot_len = length;
+    p->ref = 1;
+    
+    if (!p->payload) {
+        kfree(p);
+        return NULL;
+    }
+    return p;
+}
+
+void pbuf_free(struct pbuf *p) {
+    if (p) {
+        if (p->payload) kfree(p->payload);
+        kfree(p);
+    }
 }
 
 // ============================================================================
 // Network Interface (ethernetif)
 // ============================================================================
 
-// This would connect lwIP netif to E1000
-
-// Forward declaration of lwIP struct (we don't have lwIP headers yet)
-struct netif;
-struct pbuf;
-
 // Called by E1000 ISR callback
 void ethernetif_input(const void *data, uint16_t len) {
-    kprintf("[LWIP] Received packet (%d bytes)\n", len);
     // 1. Allocate pbuf
+    struct pbuf *p = pbuf_alloc(PBUF_RAW, len, PBUF_POOL);
+    if (!p) {
+        kprintf("[LWIP] Failed to allocate pbuf for RX\n");
+        return;
+    }
+    
     // 2. Copy data
-    // 3. Pass to tcpip_thread via mailbox
+    memcpy(p->payload, data, len);
+    
+    // 3. Pass to tcpip_thread via mailbox (simulated)
+    // In real lwIP: netif->input(p, netif);
+    // Since we don't have the netif struct initialized with a callback, we'll just log it.
+    kprintf("[LWIP] RX %d bytes -> pbuf %p\n", len, p);
+    
+    // If we had the stack:
+    // tcpip_input(p, &e1000_netif);
+    
+    // For now, free it to avoid leak
+    pbuf_free(p);
 }
 
 // Called by lwIP to send packet
 int ethernetif_output(struct netif *netif, struct pbuf *p) {
-    // Copy pbuf to flat buffer
-    // e1000_send_packet(buf, len);
+    (void)netif;
+    
+    // Copy pbuf chain to flat buffer
+    // E1000 supports max frame size, usually < 2KB for standard frames
+    uint8_t buf[2048];
+    uint16_t len = 0;
+    
+    struct pbuf *q = p;
+    while (q != NULL) {
+        if (len + q->len > 2048) break; // Overflow check
+        memcpy(buf + len, q->payload, q->len);
+        len += q->len;
+        q = q->next;
+    }
+    
+    e1000_send_packet(buf, len);
     return 0;
 }
 
@@ -97,8 +257,19 @@ int ethernetif_output(struct netif *netif, struct pbuf *p) {
 void ethernetif_init(struct netif *netif) {
     // Set MAC address from E1000
     uint8_t *mac = e1000_get_mac();
-    // netif->hwaddr[0] = mac[0]; ...
+    
+    if (netif) {
+        for (int i=0; i<6; i++) netif->hwaddr[i] = mac[i];
+        netif->hwaddr_len = 6;
+        netif->mtu = 1500;
+        netif->flags = 0; // BROADCAST | ETHARP | LINK_UP
+        
+        netif->linkoutput = (err_t (*)(struct netif*, struct pbuf*))ethernetif_output;
+        // netif->output is usually etharp_output
+    }
     
     // Register callback
     e1000_set_rx_callback(ethernetif_input);
+    
+    kprintf("[LWIP] Ethernet interface initialized\n");
 }
