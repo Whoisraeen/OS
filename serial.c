@@ -1,6 +1,8 @@
 #include "serial.h"
 #include "io.h"
 #include "spinlock.h"
+#include "klog.h"
+#include "console.h"
 
 #define COM1_PORT 0x3F8
 
@@ -81,13 +83,19 @@ static void print_num(uint64_t num, int base, int width, char pad) {
     
     // Pad
     while (i < width) {
-        serial_putc(pad);
+        char c = pad;
+        klog_putc(c);
+        serial_putc(c);
+        console_putc(c);
         width--;
     }
     
     // Print in reverse
     while (i > 0) {
-        serial_putc(buf[--i]);
+        char c = buf[--i];
+        klog_putc(c);
+        serial_putc(c);
+        console_putc(c);
     }
 }
 
@@ -120,7 +128,9 @@ void kprintf(const char *fmt, ...) {
                 case 'i': {
                     int val = va_arg(args, int);
                     if (val < 0) {
+                        klog_putc('-');
                         serial_putc('-');
+                        console_putc('-');
                         val = -val;
                     }
                     print_num((uint64_t)val, 10, width, pad);
@@ -139,52 +149,64 @@ void kprintf(const char *fmt, ...) {
                 case 'l': {
                     fmt++;
                     if (*fmt == 'x') {
-                        uint64_t val = va_arg(args, uint64_t);
-                        print_num(val, 16, width, pad);
+                        unsigned long val = va_arg(args, unsigned long);
+                        print_num((uint64_t)val, 16, width, pad);
                     } else if (*fmt == 'u') {
-                        uint64_t val = va_arg(args, uint64_t);
-                        print_num(val, 10, width, pad);
+                        unsigned long val = va_arg(args, unsigned long);
+                        print_num((uint64_t)val, 10, width, pad);
+                    } else if (*fmt == 'd') {
+                         long val = va_arg(args, long);
+                         if (val < 0) {
+                            klog_putc('-');
+                            serial_putc('-');
+                            console_putc('-');
+                            val = -val;
+                        }
+                        print_num((uint64_t)val, 10, width, pad);
                     }
                     break;
                 }
-                case 'p': {
-                    uint64_t val = (uint64_t)va_arg(args, void *);
-                    serial_puts("0x");
-                    print_num(val, 16, 16, '0');
-                    break;
-                }
                 case 's': {
-                    const char *str = va_arg(args, const char *);
-                    if (str) {
-                        serial_puts(str);
-                    } else {
-                        serial_puts("(null)");
+                    const char *s = va_arg(args, const char *);
+                    if (!s) s = "(null)";
+                    while (*s) {
+                        klog_putc(*s);
+                        serial_putc(*s);
+                        console_putc(*s);
+                        s++;
                     }
                     break;
                 }
                 case 'c': {
-                    char c = (char)va_arg(args, int);
-                    serial_putc(c);
+                    int c = va_arg(args, int);
+                    klog_putc((char)c);
+                    serial_putc((char)c);
+                    console_putc((char)c);
                     break;
                 }
-                case '%':
-                    serial_putc('%');
+                case 'p': {
+                    void *ptr = va_arg(args, void *);
+                    klog_putc('0'); klog_putc('x');
+                    serial_putc('0'); serial_putc('x');
+                    console_putc('0'); console_putc('x');
+                    print_num((uint64_t)ptr, 16, 0, ' ');
                     break;
-                default:
+                }
+                case '%': {
+                    klog_putc('%');
                     serial_putc('%');
-                    serial_putc(*fmt);
+                    console_putc('%');
                     break;
+                }
             }
         } else {
-            if (*fmt == '\n') {
-                serial_putc('\r');
-            }
+            klog_putc(*fmt);
             serial_putc(*fmt);
+            console_putc(*fmt);
         }
         fmt++;
     }
     
     va_end(args);
-    
     spinlock_release(&serial_lock);
 }

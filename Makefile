@@ -23,12 +23,22 @@ CFLAGS = -O2 -g -Wall -Wextra -Wpedantic \
 LDFLAGS = -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -T linker.ld
 
 # Source files
-SRCS = kernel.c gdt.c idt.c pic.c keyboard.c pmm.c vmm.c heap.c serial.c console.c vfs.c initrd.c syscall.c user.c shell.c timer.c sched.c mouse.c desktop.c speaker.c compositor.c elf.c ipc.c security.c spinlock.c cpu.c lapic.c mutex.c semaphore.c fd.c pipe.c signal.c futex.c vm_area.c acpi.c ioapic.c rtc.c driver.c pci.c dma.c devfs.c ahci.c
+SRCS = kernel.c gdt.c idt.c pic.c keyboard.c pmm.c vmm.c heap.c serial.c \
+       console.c vfs.c initrd.c syscall.c user.c shell.c timer.c sched.c \
+       mouse.c desktop.c speaker.c compositor.c elf.c ipc.c security.c \
+       spinlock.c cpu.c lapic.c mutex.c semaphore.c fd.c pipe.c signal.c \
+       futex.c vm_area.c acpi.c ioapic.c rtc.c driver.c pci.c dma.c \
+       devfs.c ahci.c bga.c block.c partition.c bcache.c ext2.c klog.c
+
 OBJS = $(SRCS:.c=.o) interrupts.o
 
 .PHONY: all clean run iso
 
 all: $(ISO_IMAGE)
+
+clean:
+	rm -f $(OBJS) $(KERNEL_BIN) $(ISO_IMAGE) iso_root/kernel.elf
+	rm -rf initrd iso_root
 
 iso: $(ISO_IMAGE)
 
@@ -49,7 +59,23 @@ initrd/compositor.elf: userspace/compositor.c userspace/linker.ld
 	mkdir -p initrd
 	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/compositor.c -o initrd/compositor.elf
 
-initrd.tar: initrd/init.elf initrd/compositor.elf
+initrd/service_manager.elf: userspace/service_manager.c userspace/linker.ld
+	mkdir -p initrd
+	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/service_manager.c -o initrd/service_manager.elf
+
+initrd/keyboard_driver.elf: userspace/keyboard_driver.c userspace/linker.ld
+	mkdir -p initrd
+	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/keyboard_driver.c -o initrd/keyboard_driver.elf
+
+initrd/mouse_driver.elf: userspace/mouse_driver.c userspace/linker.ld
+	mkdir -p initrd
+	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/mouse_driver.c -o initrd/mouse_driver.elf
+
+initrd/terminal.elf: userspace/terminal.c userspace/linker.ld
+	mkdir -p initrd
+	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/terminal.c -o initrd/terminal.elf
+
+initrd.tar: initrd/init.elf initrd/compositor.elf initrd/service_manager.elf initrd/keyboard_driver.elf initrd/mouse_driver.elf initrd/terminal.elf
 	tar -cvf initrd.tar -C initrd .
 
 $(ISO_IMAGE): $(KERNEL_BIN) limine initrd.tar
@@ -57,12 +83,12 @@ $(ISO_IMAGE): $(KERNEL_BIN) limine initrd.tar
 	mkdir -p iso_root
 	
 	# Copy the kernel, config, and initrd
-	cp $(KERNEL_BIN) limine.cfg initrd.tar limine/limine-bios.sys limine/limine-bios-cd.bin limine/limine-uefi-cd.bin iso_root/
-	
+	cp -f $(KERNEL_BIN) limine.cfg initrd.tar limine/limine-bios.sys limine/limine-bios-cd.bin limine/limine-uefi-cd.bin iso_root/
+
 	# Create directory for EFI boot
 	mkdir -p iso_root/EFI/BOOT
-	cp limine/BOOTX64.EFI iso_root/EFI/BOOT/
-	cp limine/BOOTIA32.EFI iso_root/EFI/BOOT/
+	cp -f limine/BOOTX64.EFI iso_root/EFI/BOOT/
+	cp -f limine/BOOTIA32.EFI iso_root/EFI/BOOT/
 
 	# Create the ISO using xorriso
 	xorriso -as mkisofs -b limine-bios-cd.bin \

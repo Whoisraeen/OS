@@ -18,6 +18,43 @@ static int active_port = -1;
 static ahci_cmd_header_t *cmd_header_virt[32];
 static ahci_cmd_table_t *cmd_table_virt[32];
 
+// Interrupt Synchronization
+static volatile int cmd_complete = 0;
+
+// Interrupt Handler (called from IDT)
+void ahci_isr(void) {
+    if (!abar) return;
+
+    // Check Global IS
+    uint32_t is = abar->is;
+    if (is == 0) return;
+
+    // Acknowledge Global IS
+    abar->is = is;
+
+    // Check Active Port
+    if (active_port != -1 && (is & (1 << active_port))) {
+        ahci_port_regs_t *port = &abar->ports[active_port];
+        uint32_t pis = port->is;
+        
+        // Clear Port IS
+        port->is = pis;
+        
+        // Check for errors
+        if (pis & (1 << 30)) { // TFES - Task File Error Status
+            kprintf("[AHCI] ISR: Disk Error (IS=0x%x)\n", pis);
+            cmd_complete = -1; // Error
+        } else if (pis & (1 << 5)) { // DPS - Descriptor Processed
+             // This fires for every PRD. We want completion.
+        }
+        
+        // We typically look for D2H Register FIS (bit 0) or Set Device Bits (bit 2)
+        if (pis & ((1 << 0) | (1 << 2) | (1 << 5))) {
+            cmd_complete = 1;
+        }
+    }
+}
+
 // Check device type
 static int check_type(ahci_port_regs_t *port) {
     uint32_t ssts = port->ssts;
@@ -45,11 +82,37 @@ static void start_cmd(ahci_port_regs_t *port) {
 
 // Stop command engine
 static void stop_cmd(ahci_port_regs_t *port) {
-    port->cmd &= ~AHCI_CMD_ST; // Clear ST
-    port->cmd &= ~AHCI_CMD_FRE; // Clear FRE
+    // 1. Clear ST (Start)
+    port->cmd &= ~AHCI_CMD_ST;
 
+    // 2. Wait for CR (Command List Running) and FR (FIS Receive Running) to clear
     int limit = 1000000;
-    while (port->cmd & (AHCI_CMD_FR | AHCI_CMD_CR)) {
+    while (port->cmd & (AHCI_CMD_CR | AHCI_CMD_FR)) {
+        limit--;
+        if (limit == 0) break;
+    }
+
+    // 3. If stuck, try Command List Override (CLO) if supported
+    if (port->cmd & (AHCI_CMD_CR | AHCI_CMD_FR)) {
+        if (abar->cap & AHCI_CAP_SCLO) {
+            kprintf("[AHCI] Port hung, attempting CLO...\n");
+            port->cmd |= AHCI_CMD_CLO;
+            
+            // Wait for CLO to clear
+            limit = 1000000;
+            while (port->cmd & AHCI_CMD_CLO) {
+                limit--;
+                if (limit == 0) break;
+            }
+        }
+    }
+
+    // 4. Clear FRE (FIS Receive Enable)
+    port->cmd &= ~AHCI_CMD_FRE;
+
+    // 5. Final wait
+    limit = 1000000;
+    while (port->cmd & (AHCI_CMD_CR | AHCI_CMD_FR)) {
         limit--;
         if (limit == 0) {
             kprintf("[AHCI] Warning: Stop CMD timed out (CMD=0x%x)\n", port->cmd);
@@ -58,10 +121,46 @@ static void stop_cmd(ahci_port_regs_t *port) {
     }
 }
 
+// Port Reset (COMRESET)
+static void port_reset(ahci_port_regs_t *port) {
+    // 1. Set DET=1 (Initialize)
+    uint32_t sctl = port->sctl;
+    sctl = (sctl & 0xFFFFFFF0) | 1;
+    port->sctl = sctl;
+
+    // 2. Wait > 1ms (spin)
+    for (volatile int i = 0; i < 100000; i++);
+
+    // 3. Set DET=0 (No action)
+    sctl = (sctl & 0xFFFFFFF0);
+    port->sctl = sctl;
+
+    // 4. Wait for DET=3 (Device present)
+    int limit = 1000000;
+    while ((port->ssts & 0xF) != 3) {
+        limit--;
+        if (limit == 0) {
+            kprintf("[AHCI] Warning: Port reset failed (no device?)\n");
+            return;
+        }
+    }
+    
+    // Clear error register
+    port->serr = 0xFFFFFFFF;
+}
+
 // Configure a port
 static void port_configure(int port_no) {
-    kprintf("[AHCI] Port %d: Stopping CMD...\n", port_no);
     ahci_port_regs_t *port = &abar->ports[port_no];
+
+    // Spec recommendation: Stop engine BEFORE resetting
+    kprintf("[AHCI] Port %d: Stopping CMD...\n", port_no);
+    stop_cmd(port);
+
+    kprintf("[AHCI] Port %d: Resetting...\n", port_no);
+    port_reset(port);
+    
+    // Stop again to be sure after reset
     stop_cmd(port);
 
     kprintf("[AHCI] Port %d: Allocating memory...\n", port_no);
@@ -99,8 +198,26 @@ static void port_configure(int port_no) {
     cmd_table_virt[port_no] = (ahci_cmd_table_t *)p2v(ct_phys);
     memset(cmd_table_virt[port_no], 0, sizeof(ahci_cmd_table_t));
 
-    kprintf("[AHCI] Port %d: Starting CMD...\n", port_no);
+    // Start command engine
     start_cmd(port);
+
+    // Wait for ST to be set
+    int spin = 0;
+    while (!(port->cmd & AHCI_CMD_ST) && spin < 1000000) spin++;
+    if (spin >= 1000000) kprintf("[AHCI] Warning: Start CMD timed out\n");
+
+    // Clear error status
+    port->serr = 0xFFFFFFFF;
+    
+    // Enable Interrupts
+    // DHRS (Bit 0) - D2H Register FIS
+    // PSS (Bit 1) - PIO Setup FIS
+    // DSS (Bit 2) - DMA Setup FIS
+    // SDBS (Bit 3) - Set Device Bits FIS
+    // UFS (Bit 4) - Unknown FIS
+    // DPS (Bit 5) - Descriptor Processed
+    // TFES (Bit 30) - Task File Error Status
+    port->ie = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 5) | (1 << 30);
 }
 
 void ahci_init(void) {
@@ -128,10 +245,29 @@ void ahci_init(void) {
     // Map ABAR
     abar = (ahci_hba_mem_t *)p2v(bar5_phys);
     
-    // Check AHCI Enable
-    if (!(abar->ghc & AHCI_GHC_AE)) {
-        abar->ghc |= AHCI_GHC_AE;
+    // Perform HBA Reset
+    kprintf("[AHCI] Resetting HBA...\n");
+    abar->ghc |= AHCI_GHC_HR;
+    int limit = 1000000;
+    while ((abar->ghc & AHCI_GHC_HR) && limit > 0) {
+        limit--;
     }
+    if (limit == 0) {
+        kprintf("[AHCI] Warning: HBA Reset timed out\n");
+    }
+
+    // Enable AHCI mode
+    abar->ghc |= AHCI_GHC_AE;
+    
+    // Enable MSI (Vector 46)
+    if (pci_enable_msi(dev, 46, 0) == 0) {
+        kprintf("[AHCI] MSI Enabled (Vector 46)\n");
+    } else {
+        kprintf("[AHCI] Warning: MSI Enable Failed, falling back to polling/Legacy IRQ\n");
+    }
+
+    // Enable Global Interrupts in GHC
+    abar->ghc |= AHCI_GHC_IE;
 
     kprintf("[AHCI] ABAR mapped at 0x%lx (phys 0x%lx)\n", (uint64_t)abar, bar5_phys);
     kprintf("[AHCI] Cap: 0x%x, PI: 0x%x, Ver: 0x%x\n", abar->cap, abar->pi, abar->vs);
@@ -221,17 +357,46 @@ int ahci_read(uint64_t lba, uint32_t count, uint8_t *buffer) {
     tbl->prdt[0].i = 1;
 
     // Issue command
-    while (port->tfd & (0x80 | 0x08)); // Wait for BSY and DRQ to clear
+    int spin = 0;
+    while ((port->tfd & (0x80 | 0x08)) && spin < 1000000) {
+        spin++;
+    }
+    if (spin >= 1000000) {
+        kprintf("[AHCI] Read Error: Port hung (BSY/DRQ)\n");
+        return -1;
+    }
+    
+    // Reset Completion Flag
+    cmd_complete = 0;
     
     port->ci = (1 << slot);
 
-    // Wait for completion
+    // Wait for interrupt (or timeout)
+    // In a real OS, we would sleep the thread.
+    // For now, we busy-wait but check the flag set by ISR.
+    // We also keep checking the hardware for redundancy/safety.
+    
+    int timeout = 10000000; // Increase timeout for slower I/O
     while (1) {
-        if ((port->ci & (1 << slot)) == 0) break; // Command cleared
-        if (port->is & (1 << 30)) { // Error
-            kprintf("[AHCI] Read Error (IS=0x%x, TFD=0x%x)\n", port->is, port->tfd);
+        if (cmd_complete == 1) break; // ISR signaled completion
+        if (cmd_complete == -1) return -1; // ISR signaled error
+        
+        // Fallback: Check hardware directly if ISR missed or MSI failed
+        if ((port->ci & (1 << slot)) == 0) break; 
+        if (port->is & (1 << 30)) {
+            kprintf("[AHCI] Read Error (IS=0x%x)\n", port->is);
             return -1;
         }
+        
+        timeout--;
+        if (timeout == 0) {
+            kprintf("[AHCI] Read Timeout (cmd_complete=%d, ci=0x%x, is=0x%x)\n", cmd_complete, port->ci, port->is);
+            return -1;
+        }
+        
+        // Yield CPU to allow other interrupts to fire if needed
+        // (Though in our kernel, interrupts fire anyway)
+        __asm__ volatile("pause");
     }
 
     return 0;
@@ -276,16 +441,37 @@ int ahci_write(uint64_t lba, uint32_t count, const uint8_t *buffer) {
     tbl->prdt[0].dbc = (count * 512) - 1;
     tbl->prdt[0].i = 1;
 
-    while (port->tfd & (0x80 | 0x08));
+    // Issue command
+    int spin = 0;
+    while ((port->tfd & (0x80 | 0x08)) && spin < 1000000) {
+        spin++;
+    }
+    if (spin >= 1000000) {
+        kprintf("[AHCI] Write Error: Port hung (BSY/DRQ)\n");
+        return -1;
+    }
+    
+    // Reset Completion Flag
+    cmd_complete = 0;
     
     port->ci = (1 << slot);
 
+    int timeout = 10000000;
     while (1) {
+        if (cmd_complete == 1) break;
+        if (cmd_complete == -1) return -1;
+
         if ((port->ci & (1 << slot)) == 0) break;
         if (port->is & (1 << 30)) {
             kprintf("[AHCI] Write Error (IS=0x%x)\n", port->is);
             return -1;
         }
+        timeout--;
+        if (timeout == 0) {
+            kprintf("[AHCI] Write Timeout\n");
+            return -1;
+        }
+        __asm__ volatile("pause");
     }
 
     return 0;

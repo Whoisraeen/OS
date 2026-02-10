@@ -150,7 +150,16 @@ void vmm_init(void) {
     // Map the framebuffer
     if (fb_ptr != NULL) {
         uint64_t fb_virt = (uint64_t)fb_ptr;
-        uint64_t fb_phys = fb_virt - hhdm_offset;
+        uint64_t fb_phys;
+        
+        // Determine physical address
+        if (kernel_addr && fb_virt >= kernel_addr->virtual_base && fb_virt < kernel_addr->virtual_base + 64*1024*1024) {
+            fb_phys = fb_virt - kernel_addr->virtual_base + kernel_addr->physical_base;
+        } else {
+            // Assume HHDM
+            fb_phys = fb_virt - hhdm_offset;
+        }
+
         uint64_t fb_size = fb_width * fb_height * 4;
         fb_size = (fb_size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
 

@@ -57,5 +57,15 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
 #define SYS_REBOOT       56
 #define SYS_SHUTDOWN     57
 #define SYS_IOCTL        58
+#define SYS_STAT         59
+#define SYS_MKDIR        60
+#define SYS_RMDIR        61
+#define SYS_UNLINK       62
+#define SYS_RENAME       63
+#define SYS_GETDENTS     64
+#define SYS_IOPORT       65
+#define SYS_IRQ_WAIT     66
+#define SYS_IRQ_ACK      67
+#define SYS_MAP_PHYS     68
 
 #endif

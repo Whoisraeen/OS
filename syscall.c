@@ -21,6 +21,7 @@
 #include "rtc.h"
 #include "acpi.h"
 #include "driver.h"
+#include "ext2.h"
 
 // MSR registers
 #define MSR_EFER     0xC0000080
@@ -136,11 +137,24 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             if (copy_string_from_user(path, (const char *)arg1, sizeof(path)) < 0)
                 return (uint64_t)-1;
 
-            vfs_node_t *node = initrd_find(path);
-            if (!node) return (uint64_t)-1;
-
             task_t *task = task_get_by_id(current_pid);
             if (!task || !task->fd_table) return (uint64_t)-1;
+
+            // Use VFS to open/create the node
+            vfs_node_t *node = vfs_open(path, (int)arg2);
+
+            if (!node) return (uint64_t)-1;
+
+            // Truncate if O_TRUNC and file is writable
+            if (((uint32_t)arg2 & O_TRUNC) && node->inode != 0 && node->write != NULL) {
+                // Assumption: Only Ext2 is writable.
+                // We should really check if the node belongs to ext2_root_fs
+                // But for now, this heuristic works.
+                if (ext2_root_fs) {
+                     ext2_truncate(ext2_root_fs, (uint32_t)node->inode);
+                     node->length = 0;
+                }
+            }
 
             int fd = fd_alloc(task->fd_table);
             if (fd < 0) return (uint64_t)-1;
@@ -150,6 +164,12 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             entry->node = node;
             entry->offset = 0;
             entry->flags = (uint32_t)arg2;
+
+            // O_APPEND: start at end
+            if ((uint32_t)arg2 & O_APPEND) {
+                entry->offset = node->length;
+            }
+
             return (uint64_t)fd;
         }
 
@@ -506,8 +526,8 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
                 return (uint64_t)-1;
             }
 
-            // Find file in VFS (Initrd)
-            vfs_node_t *node = initrd_find(path);
+            // Find file in VFS
+            vfs_node_t *node = vfs_open(path, 0);
             if (!node) {
                 kprintf("[SYSCALL] exec: file not found '%s'\n", path);
                 return (uint64_t)-1;
@@ -540,6 +560,10 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
                 kprintf("[SYSCALL] get_framebuffer: permission denied (PID %u)\n", current_pid);
                 return (uint64_t)-1;
             }
+
+            // Display Handover: Disable kernel console output to screen
+            console_set_enabled(0);
+            kprintf("[SYSCALL] Display handover to PID %u. Kernel console disabled.\n", current_pid);
 
             extern uint32_t *fb_ptr;
             extern uint64_t fb_width;
@@ -667,6 +691,157 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             (void)arg2;
             (void)arg3;
             return (uint64_t)-1; // Not yet implemented for specific devices
+        }
+
+        // === Filesystem Syscalls ===
+        case SYS_STAT: {
+            // arg1 = path (user), arg2 = pointer to ext2_stat_t (user)
+            if (!ext2_root_fs) return (uint64_t)-1;
+
+            char path[256];
+            if (copy_string_from_user(path, (const char *)arg1, sizeof(path)) < 0)
+                return (uint64_t)-1;
+            if (!is_user_address(arg2, sizeof(ext2_stat_t))) return (uint64_t)-1;
+
+            uint32_t ino = ext2_resolve_path(ext2_root_fs, path, NULL);
+            if (ino == 0) return (uint64_t)-1;
+
+            return (uint64_t)ext2_stat(ext2_root_fs, ino, (ext2_stat_t *)arg2);
+        }
+
+        case SYS_MKDIR: {
+            // arg1 = path (user), arg2 = mode
+            if (!ext2_root_fs) return (uint64_t)-1;
+
+            char path[256];
+            if (copy_string_from_user(path, (const char *)arg1, sizeof(path)) < 0)
+                return (uint64_t)-1;
+
+            char name[256];
+            uint32_t parent_ino = ext2_resolve_parent(ext2_root_fs, path, name, sizeof(name));
+            if (parent_ino == 0) return (uint64_t)-1;
+
+            uint16_t mode = EXT2_S_IFDIR | ((uint16_t)arg2 & 0x0FFF);
+            uint32_t new_ino = ext2_create(ext2_root_fs, parent_ino, name, mode);
+            return (new_ino != 0) ? 0 : (uint64_t)-1;
+        }
+
+        case SYS_RMDIR: {
+            // arg1 = path (user)
+            if (!ext2_root_fs) return (uint64_t)-1;
+
+            char path[256];
+            if (copy_string_from_user(path, (const char *)arg1, sizeof(path)) < 0)
+                return (uint64_t)-1;
+
+            char name[256];
+            uint32_t parent_ino = ext2_resolve_parent(ext2_root_fs, path, name, sizeof(name));
+            if (parent_ino == 0) return (uint64_t)-1;
+
+            return (uint64_t)ext2_rmdir(ext2_root_fs, parent_ino, name);
+        }
+
+        case SYS_UNLINK: {
+            // arg1 = path (user)
+            if (!ext2_root_fs) return (uint64_t)-1;
+
+            char path[256];
+            if (copy_string_from_user(path, (const char *)arg1, sizeof(path)) < 0)
+                return (uint64_t)-1;
+
+            char name[256];
+            uint32_t parent_ino = ext2_resolve_parent(ext2_root_fs, path, name, sizeof(name));
+            if (parent_ino == 0) return (uint64_t)-1;
+
+            return (uint64_t)ext2_unlink(ext2_root_fs, parent_ino, name);
+        }
+
+        case SYS_RENAME: {
+            // arg1 = old path (user), arg2 = new path (user)
+            if (!ext2_root_fs) return (uint64_t)-1;
+
+            char old_path[256], new_path[256];
+            if (copy_string_from_user(old_path, (const char *)arg1, sizeof(old_path)) < 0)
+                return (uint64_t)-1;
+            if (copy_string_from_user(new_path, (const char *)arg2, sizeof(new_path)) < 0)
+                return (uint64_t)-1;
+
+            char old_name[256], new_name[256];
+            uint32_t old_parent = ext2_resolve_parent(ext2_root_fs, old_path, old_name, sizeof(old_name));
+            uint32_t new_parent = ext2_resolve_parent(ext2_root_fs, new_path, new_name, sizeof(new_name));
+            if (old_parent == 0 || new_parent == 0) return (uint64_t)-1;
+
+            return (uint64_t)ext2_rename(ext2_root_fs, old_parent, old_name, new_parent, new_name);
+        }
+
+        case SYS_GETDENTS: {
+            // arg1 = fd, arg2 = pointer to dirent_t array (user), arg3 = max entries
+            task_t *task = task_get_by_id(current_pid);
+            if (!task || !task->fd_table) return (uint64_t)-1;
+            if (!ext2_root_fs) return (uint64_t)-1;
+
+            fd_entry_t *entry = fd_get(task->fd_table, (int)arg1);
+            if (!entry || entry->type != FD_FILE || !entry->node) return (uint64_t)-1;
+            if (!(entry->node->flags & VFS_DIRECTORY)) return (uint64_t)-1;
+
+            if (!is_user_address(arg2, arg3 * sizeof(dirent_t))) return (uint64_t)-1;
+
+            return (uint64_t)ext2_getdents(ext2_root_fs,
+                (uint32_t)entry->node->inode, (dirent_t *)arg2, (int)arg3);
+        }
+
+        // === Driver Support Syscalls ===
+        case SYS_IOPORT: {
+            // arg1 = port, arg2 = value (for write), arg3 = operation (0=READ, 1=WRITE)
+            if (!security_has_capability(current_pid, CAP_HW_INPUT)) { // Or generic HW_IO cap
+                return (uint64_t)-1;
+            }
+            if (arg3 == 0) { // READ
+                return (uint64_t)inb((uint16_t)arg1);
+            } else { // WRITE
+                outb((uint16_t)arg1, (uint8_t)arg2);
+                return 0;
+            }
+        }
+
+        case SYS_IRQ_WAIT: {
+            // arg1 = irq number
+            if (!security_has_capability(current_pid, CAP_HW_INPUT)) {
+                return (uint64_t)-1;
+            }
+            // For now, simple busy wait or just return (mocking).
+            // Real implementation needs a per-process IRQ wait queue.
+            // TODO: Implement IRQ wait queues in scheduler
+            return 0; 
+        }
+
+        case SYS_MAP_PHYS: {
+            // arg1 = phys_addr, arg2 = size
+            if (!security_has_capability(current_pid, CAP_HW_DISK)) { // Needs root/driver cap
+                return (uint64_t)-1;
+            }
+            
+            // Map physical memory to user space (similar to get_framebuffer but generic)
+            uint64_t size = (arg2 + 0xFFF) & ~0xFFFULL;
+            uint64_t phys = arg1 & ~0xFFFULL;
+            
+            // Find free user virtual address
+            task_t *task = task_get_by_id(current_pid);
+            if (!task || !task->mm) return (uint64_t)-1;
+            
+            uint64_t virt = vma_find_free(task->mm, size);
+            if (virt == 0) return (uint64_t)-1;
+            
+            // Map it
+            for (uint64_t off = 0; off < size; off += 4096) {
+                vmm_map_user_page(virt + off, phys + off);
+            }
+            
+            // Create VMA to track it
+            vm_area_t *vma = vma_create(virt, virt + size, VMA_USER | VMA_READ | VMA_WRITE, VMA_TYPE_ANONYMOUS); // Should be VMA_TYPE_DEVICE
+            if (vma) vma_insert(task->mm, vma);
+            
+            return virt;
         }
 
         default:

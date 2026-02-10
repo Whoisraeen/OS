@@ -5,7 +5,10 @@
 #include "sched.h"
 #include "timer.h"
 #include "cpu.h"
+#include "console.h" // For panic BSOD
+#include "klog.h"    // For panic dump
 #include <stddef.h>
+#include <stdarg.h>
 
 struct idt_entry idt[256];
 struct idt_ptr idtp;
@@ -18,6 +21,9 @@ extern void keyboard_handler(struct interrupt_frame *frame);
 
 // External Mouse Handler (from mouse.c)
 extern void mouse_handler(void);
+
+// AHCI Handler
+extern void ahci_isr(void);
 
 // Debugging globals
 extern uint32_t *fb_ptr;
@@ -49,6 +55,39 @@ static const char *exception_names[] = {
     "Reserved", "Reserved", "Reserved", "Reserved",
     "Hypervisor Injection", "VMM Communication", "Security Exception", "Reserved"
 };
+
+void panic(const char *fmt, ...) {
+    // Disable interrupts
+    __asm__ volatile ("cli");
+    
+    // Force enable console for BSOD
+    console_set_enabled(1);
+    
+    // Blue Background (BSOD)
+    if (fb_ptr) {
+        for (size_t i = 0; i < fb_width * fb_height; i++)
+            fb_ptr[i] = 0xFF0000AA; // Blue
+    }
+    
+    // Reset cursor and colors
+    console_set_colors(0xFFFFFFFF, 0xFF0000AA);
+    console_clear();
+    
+    kprintf("\n  *** KERNEL PANIC ***\n\n");
+    
+    // Since kprintf doesn't support va_list, we just print the format string
+    // and hope it's descriptive enough. 
+    // Ideally we should implement vkprintf.
+    kprintf("Reason: %s\n", fmt);
+    
+    kprintf("\n\nSystem Halted.\n");
+    
+    // Dump klog
+    kprintf("\n--- Kernel Log Dump ---\n");
+    klog_dump();
+    
+    for (;;) __asm__("hlt");
+}
 
 uint64_t isr_handler(struct interrupt_frame *frame) {
     // ---- Timer IRQ (Vector 32) — Preemptive scheduling ----
@@ -89,64 +128,55 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
             }
         }
 
-        kprintf("\n*** PAGE FAULT ***\n");
-        kprintf("Address: 0x%lx\n", faulting_addr);
-        kprintf("Error:   0x%lx (", frame->err_code);
-        if (frame->err_code & 1) kprintf("present ");
-        if (frame->err_code & 2) kprintf("write ");
-        else kprintf("read ");
-        if (frame->err_code & 4) kprintf("user ");
-        else kprintf("kernel ");
-        if (frame->err_code & 8) kprintf("reserved-write ");
-        if (frame->err_code & 16) kprintf("instruction-fetch ");
-        kprintf(")\n");
-        kprintf("RIP: 0x%lx  CS: 0x%lx\n", frame->rip, frame->cs);
-        kprintf("RSP: 0x%lx  SS: 0x%lx\n", frame->rsp, frame->ss);
-
         // User-mode page fault: terminate the task
         if (frame->cs & 3) {
-            kprintf("[PAGE FAULT] User process fault — terminating task %u\n",
+            kprintf("\n[PAGE FAULT] User process fault — terminating task %u\n",
                     task_current_id());
+            kprintf("Addr: 0x%lx, IP: 0x%lx\n", faulting_addr, frame->rip);
             task_exit();
             return (uint64_t)frame;
         }
 
         // Kernel page fault: unrecoverable, panic
-        kprintf("[PAGE FAULT] KERNEL PANIC — halting\n");
-        kprintf("RAX=0x%lx RBX=0x%lx RCX=0x%lx RDX=0x%lx\n",
-                frame->rax, frame->rbx, frame->rcx, frame->rdx);
-        kprintf("RSI=0x%lx RDI=0x%lx RBP=0x%lx\n",
-                frame->rsi, frame->rdi, frame->rbp);
+        console_set_enabled(1);
         if (fb_ptr) {
             for (size_t i = 0; i < fb_width * fb_height; i++)
-                fb_ptr[i] = 0xFFFF0000;
+                fb_ptr[i] = 0xFFFF0000; // Red
         }
+        console_set_colors(0xFFFFFFFF, 0xFFFF0000);
+        console_clear();
+        kprintf("*** KERNEL PANIC (PAGE FAULT) ***\n");
+        kprintf("Address: 0x%lx\n", faulting_addr);
+        kprintf("Error:   0x%lx\n", frame->err_code);
+        kprintf("RIP:     0x%lx\n", frame->rip);
+        klog_dump();
         for (;;) __asm__("hlt");
     }
 
     // ---- Other exceptions (0-31, except 14 handled above) ----
     if (frame->int_no < 32) {
         const char *name = (frame->int_no < 32) ? exception_names[frame->int_no] : "Unknown";
-        kprintf("\n*** EXCEPTION %lu: %s ***\n", frame->int_no, name);
-        kprintf("Error code: 0x%lx\n", frame->err_code);
-        kprintf("RIP: 0x%lx  CS: 0x%lx\n", frame->rip, frame->cs);
-        kprintf("RSP: 0x%lx  SS: 0x%lx\n", frame->rsp, frame->ss);
-        kprintf("RAX=0x%lx RBX=0x%lx RCX=0x%lx RDX=0x%lx\n",
-                frame->rax, frame->rbx, frame->rcx, frame->rdx);
-
+        
         // User-mode exception: terminate the task
         if (frame->cs & 3) {
-            kprintf("[EXCEPTION] User process fault — terminating task %u\n",
-                    task_current_id());
+            kprintf("\n[EXCEPTION] %s (0x%lx) at 0x%lx — terminating task %u\n",
+                    name, frame->int_no, frame->rip, task_current_id());
             task_exit();
             return (uint64_t)frame;
         }
 
         // Kernel exception: panic
+        console_set_enabled(1);
         if (fb_ptr) {
             for (size_t i = 0; i < fb_width * fb_height; i++)
                 fb_ptr[i] = 0xFFFF0000;
         }
+        console_set_colors(0xFFFFFFFF, 0xFFFF0000);
+        console_clear();
+        kprintf("*** KERNEL PANIC (%s) ***\n", name);
+        kprintf("Error code: 0x%lx\n", frame->err_code);
+        kprintf("RIP: 0x%lx\n", frame->rip);
+        klog_dump();
         for (;;) __asm__("hlt");
     }
 
@@ -158,6 +188,13 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
     // ---- IRQ 12 (Mouse, Vector 44) ----
     if (frame->int_no == 44) {
         mouse_handler();
+    }
+
+    // ---- AHCI MSI (Vector 46) ----
+    if (frame->int_no == 46) {
+        ahci_isr();
+        if (lapic_is_ioapic_mode()) lapic_eoi();
+        return (uint64_t)frame;
     }
 
     // ---- Spurious vector (0xFF = 255) — no EOI needed ----

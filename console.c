@@ -1,6 +1,8 @@
 #include "console.h"
 #include "font.h"
+#include "serial.h"
 #include <stddef.h>
+#include <stdarg.h>
 
 // External framebuffer globals from kernel.c
 extern uint32_t *fb_ptr;
@@ -14,6 +16,7 @@ static size_t console_cols = 0;
 static size_t console_rows = 0;
 static uint32_t fg_color = 0xFFFFFFFF; // White
 static uint32_t bg_color = 0xFF003366; // Sony Blue
+static int console_enabled = 1; // Default enabled
 
 void console_init(void) {
     if (fb_ptr == NULL || fb_width == 0 || fb_height == 0) {
@@ -24,6 +27,11 @@ void console_init(void) {
     console_rows = fb_height / FONT_HEIGHT;
     cursor_x = 0;
     cursor_y = 0;
+    console_enabled = 1;
+}
+
+void console_set_enabled(int enabled) {
+    console_enabled = enabled;
 }
 
 void console_set_colors(uint32_t fg, uint32_t bg) {
@@ -89,7 +97,10 @@ static void draw_char(char c, size_t x, size_t y) {
 }
 
 void console_putc(char c) {
-    if (fb_ptr == NULL) return;
+    // Mirror to serial
+    serial_putc(c);
+
+    if (fb_ptr == NULL || !console_enabled) return;
     
     if (c == '\n') {
         cursor_x = 0;

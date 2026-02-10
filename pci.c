@@ -198,51 +198,50 @@ uint64_t pci_get_bar_address(pci_device_t *dev, int bar_index, uint32_t *size) {
 
     if (bar & PCI_BAR_IO) {
         // I/O BAR
-        uint64_t addr = bar & ~0x3U;
+        uint32_t addr = bar & ~0x3;
         if (size) {
-            // Size detection: write all 1s, read back, restore
-            uint8_t offset = PCI_BAR0 + bar_index * 4;
-            pci_config_write32(dev->bus, dev->slot, dev->func, offset, 0xFFFFFFFF);
-            uint32_t sz = pci_config_read32(dev->bus, dev->slot, dev->func, offset);
-            pci_config_write32(dev->bus, dev->slot, dev->func, offset, bar);
-            sz = ~(sz & ~0x3U) + 1;
-            *size = sz;
+            // Write all 1s to get size
+            pci_config_write32(dev->bus, dev->slot, dev->func, PCI_BAR0 + bar_index * 4, 0xFFFFFFFF);
+            uint32_t len = pci_config_read32(dev->bus, dev->slot, dev->func, PCI_BAR0 + bar_index * 4);
+            pci_config_write32(dev->bus, dev->slot, dev->func, PCI_BAR0 + bar_index * 4, bar);
+            *size = (~(len & ~0x3)) + 1;
         }
         return addr;
     } else {
         // Memory BAR
-        int is_64bit = ((bar >> 1) & 0x3) == 2;
-        uint64_t addr = bar & ~0xFU;
-
-        if (is_64bit && bar_index < 5) {
-            addr |= ((uint64_t)dev->bar[bar_index + 1] << 32);
+        int type = (bar >> 1) & 0x3;
+        uint64_t addr = bar & ~0xF;
+        
+        if (type == 2) { // 64-bit
+            uint32_t upper = dev->bar[bar_index + 1];
+            addr |= ((uint64_t)upper << 32);
         }
-
+        
         if (size) {
-            uint8_t offset = PCI_BAR0 + bar_index * 4;
-            pci_config_write32(dev->bus, dev->slot, dev->func, offset, 0xFFFFFFFF);
-            uint32_t sz = pci_config_read32(dev->bus, dev->slot, dev->func, offset);
-            pci_config_write32(dev->bus, dev->slot, dev->func, offset, bar);
-            sz = ~(sz & ~0xFU) + 1;
-            *size = sz;
+            pci_config_write32(dev->bus, dev->slot, dev->func, PCI_BAR0 + bar_index * 4, 0xFFFFFFFF);
+            uint32_t len = pci_config_read32(dev->bus, dev->slot, dev->func, PCI_BAR0 + bar_index * 4);
+            pci_config_write32(dev->bus, dev->slot, dev->func, PCI_BAR0 + bar_index * 4, bar);
+            *size = (~(len & ~0xF)) + 1;
         }
-
+        
         return addr;
     }
 }
 
 pci_device_t *pci_find_device_by_class(uint8_t class_code, uint8_t subclass) {
     for (int i = 0; i < device_count; i++) {
-        if (devices[i].class_code == class_code && devices[i].subclass == subclass)
+        if (devices[i].class_code == class_code && devices[i].subclass == subclass) {
             return &devices[i];
+        }
     }
-    return NULL;
+    return NULL; // Not found
 }
 
 pci_device_t *pci_find_device(uint16_t vendor, uint16_t device) {
     for (int i = 0; i < device_count; i++) {
-        if (devices[i].vendor_id == vendor && devices[i].device_id == device)
+        if (devices[i].vendor_id == vendor && devices[i].device_id == device) {
             return &devices[i];
+        }
     }
     return NULL;
 }
@@ -254,4 +253,50 @@ int pci_get_device_count(void) {
 pci_device_t *pci_get_device(int index) {
     if (index < 0 || index >= device_count) return NULL;
     return &devices[index];
+}
+
+int pci_enable_msi(pci_device_t *dev, uint8_t vector, uint8_t processor) {
+    uint16_t status = pci_config_read16(dev->bus, dev->slot, dev->func, PCI_STATUS);
+    if (!(status & (1 << 4))) return -1; // No capabilities list
+
+    uint8_t cap_ptr = pci_config_read8(dev->bus, dev->slot, dev->func, 0x34);
+    
+    // Walk capabilities list
+    while (cap_ptr != 0) {
+        uint8_t cap_id = pci_config_read8(dev->bus, dev->slot, dev->func, cap_ptr);
+        
+        if (cap_id == PCI_CAP_ID_MSI) {
+            // Found MSI capability
+            uint16_t msg_ctrl = pci_config_read16(dev->bus, dev->slot, dev->func, cap_ptr + 2);
+            
+            // 64-bit capable?
+            int is_64bit = (msg_ctrl & (1 << 7));
+            
+            // Configure Message Address
+            // Destination ID (processor) goes in bits 12-19
+            // RH=0, DM=0 (Physical Mode, Fixed Delivery)
+            uint32_t addr = 0xFEE00000 | ((uint32_t)processor << 12);
+            pci_config_write32(dev->bus, dev->slot, dev->func, cap_ptr + 4, addr);
+            
+            if (is_64bit) {
+                pci_config_write32(dev->bus, dev->slot, dev->func, cap_ptr + 8, 0); // High 32 bits = 0
+                pci_config_write16(dev->bus, dev->slot, dev->func, cap_ptr + 12, vector);
+            } else {
+                pci_config_write16(dev->bus, dev->slot, dev->func, cap_ptr + 8, vector);
+            }
+            
+            // Enable MSI in Message Control
+            // Bit 0 = MSI Enable
+            // Bits 4-6 = Multiple Message Enable (We set to 0 to request 1 vector)
+            msg_ctrl |= 1; 
+            pci_config_write16(dev->bus, dev->slot, dev->func, cap_ptr + 2, msg_ctrl);
+            
+            return 0; // Success
+        }
+        
+        // Next capability
+        cap_ptr = pci_config_read8(dev->bus, dev->slot, dev->func, cap_ptr + 1);
+    }
+    
+    return -1; // MSI not found
 }

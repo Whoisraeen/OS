@@ -23,4 +23,7 @@ void console_set_colors(uint32_t fg, uint32_t bg);
 // Clear the screen
 void console_clear(void);
 
+// Enable/Disable console output (for display handover)
+void console_set_enabled(int enabled);
+
 #endif

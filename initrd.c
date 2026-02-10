@@ -174,6 +174,21 @@ vfs_node_t *initrd_init(void *initrd_start, size_t initrd_size) {
         ptr += 512 + data_blocks * 512;
     }
     
+    // Create /disk mount point
+    if (initrd_file_count < MAX_INITRD_FILES) {
+        vfs_node_t *disk = &initrd_files[initrd_file_count];
+        str_copy(disk->name, "disk", 128);
+        disk->flags = VFS_DIRECTORY;
+        disk->length = 0;
+        disk->inode = initrd_file_count + 1;
+        disk->read = NULL;
+        disk->write = NULL;
+        disk->readdir = NULL; // Empty directory
+        disk->finddir = NULL;
+        disk->impl = NULL;
+        initrd_file_count++;
+    }
+
     return &initrd_root;
 }
 

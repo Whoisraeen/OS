@@ -113,6 +113,152 @@ typedef struct {
 static int mouse_x = 0, mouse_y = 0;
 static uint32_t mouse_buttons = 0;
 
+// Mouse State
+static int last_mouse_x = 0, last_mouse_y = 0;
+static uint32_t last_mouse_buttons = 0;
+static comp_window_t *drag_window = NULL;
+static int drag_off_x = 0, drag_off_y = 0;
+
+static void destroy_window(comp_window_t *win) {
+    if (!win) return;
+    
+    // Remove from list
+    if (win->prev) win->prev->next = win->next;
+    else windows_list = win->next;
+    
+    if (win->next) win->next->prev = win->prev;
+    
+    // Free shmem mapping if any
+    if (win->shmem_id > 0) {
+        syscall1(SYS_IPC_SHMEM_UNMAP, win->shmem_id);
+    }
+    
+    win->active = 0;
+    dirty = 1;
+}
+
+static void focus_window(comp_window_t *win) {
+    if (!win) return;
+    
+    // Unfocus all
+    for (comp_window_t *w = windows_list; w; w = w->next) {
+        w->focused = 0;
+    }
+    win->focused = 1;
+    
+    // Move to end (top)
+    if (win->next) {
+        if (win->prev) win->prev->next = win->next;
+        else windows_list = win->next;
+        win->next->prev = win->prev;
+        
+        comp_window_t *tail = windows_list;
+        while (tail->next) tail = tail->next;
+        tail->next = win;
+        win->prev = tail;
+        win->next = NULL;
+    }
+    
+    dirty = 1;
+}
+
+static comp_window_t *get_window_at(int px, int py) {
+    // Check in reverse z-order (top first)
+    comp_window_t *tail = windows_list;
+    if (!tail) return NULL;
+    while (tail->next) tail = tail->next;
+    
+    for (comp_window_t *w = tail; w; w = w->prev) {
+        if (!w->visible) continue;
+        if (px >= w->x && px < w->x + w->width &&
+            py >= w->y && py < w->y + w->height) {
+            return w;
+        }
+    }
+    return NULL;
+}
+
+static void handle_key_event(uint32_t code) {
+    // Send to focused window
+    comp_window_t *focused = NULL;
+    for (comp_window_t *w = windows_list; w; w = w->next) {
+        if (w->focused) { focused = w; break; }
+    }
+    
+    if (focused && focused->reply_port > 0) {
+        ipc_message_t fwd;
+        fwd.msg_id = MSG_INPUT_EVENT;
+        fwd.size = sizeof(msg_input_event_t);
+        msg_input_event_t *fe = (msg_input_event_t *)fwd.data;
+        fe->type = EVENT_KEY_DOWN;
+        fe->code = code;
+        syscall3(SYS_IPC_SEND, focused->reply_port, (uint64_t)&fwd, 0);
+    }
+}
+
+static void handle_mouse_event(int x, int y, uint32_t buttons) {
+    mouse_x = x;
+    mouse_y = y;
+    mouse_buttons = buttons;
+    
+    int clicked = (mouse_buttons & 1) && !(last_mouse_buttons & 1);
+    int released = !(mouse_buttons & 1) && (last_mouse_buttons & 1);
+    
+    if (clicked) {
+        comp_window_t *hit = get_window_at(mouse_x, mouse_y);
+        if (hit) {
+            focus_window(hit);
+            
+            // Check if title bar (drag)
+            if (mouse_y >= hit->y && mouse_y < hit->y + 28) {
+                // Check Close Button (Top Right)
+                if (mouse_x >= hit->x + hit->width - 28 && mouse_x <= hit->x + hit->width - 8 &&
+                    mouse_y >= hit->y + 4 && mouse_y <= hit->y + 24) {
+                    destroy_window(hit);
+                    // Don't continue, just return, but we need to update last state
+                    // Actually if we destroy, 'hit' is invalid.
+                    goto update_state;
+                }
+                
+                drag_window = hit;
+                drag_off_x = mouse_x - hit->x;
+                drag_off_y = mouse_y - hit->y;
+            }
+            
+            // Forward Click to App
+            if (hit->reply_port > 0) {
+                ipc_message_t fwd;
+                fwd.msg_id = MSG_INPUT_EVENT;
+                fwd.size = sizeof(msg_input_event_t);
+                msg_input_event_t *fe = (msg_input_event_t *)fwd.data;
+                fe->type = EVENT_MOUSE_DOWN;
+                fe->code = 1; // Left button
+                fe->x = mouse_x - hit->x;
+                fe->y = mouse_y - (hit->y + 28); // Content coords
+                syscall3(SYS_IPC_SEND, hit->reply_port, (uint64_t)&fwd, 0);
+                dirty = 1;
+            }
+        }
+    }
+    
+    if (released) {
+        drag_window = NULL;
+    }
+    
+    if (mouse_buttons & 1 && drag_window) {
+        drag_window->x = mouse_x - drag_off_x;
+        drag_window->y = mouse_y - drag_off_y;
+        dirty = 1;
+    }
+
+update_state:
+    last_mouse_buttons = mouse_buttons;
+    if (mouse_x != last_mouse_x || mouse_y != last_mouse_y) dirty = 1;
+    last_mouse_x = mouse_x;
+    last_mouse_y = mouse_y;
+}
+
+
 // ============================================================================
 // Drawing Functions
 // ============================================================================
@@ -240,7 +386,7 @@ static comp_window_t *create_window(const char *title, int x, int y, int w, int 
     win->shmem_id = shmem_id;
     win->buffer = NULL;
     if (shmem_id > 0) {
-        win->buffer = (uint32_t *)syscall1(SYS_IPC_SHMEM_MAP, shmem_id);
+        win->buffer = (uint32_t *)(uintptr_t)syscall1(SYS_IPC_SHMEM_MAP, shmem_id);
     }
     
     // Add to list
@@ -260,64 +406,7 @@ static comp_window_t *create_window(const char *title, int x, int y, int w, int 
     return win;
 }
 
-static void destroy_window(comp_window_t *win) {
-    if (!win) return;
-    
-    // Remove from list
-    if (win->prev) win->prev->next = win->next;
-    else windows_list = win->next;
-    
-    if (win->next) win->next->prev = win->prev;
-    
-    // Free shmem mapping if any
-    if (win->shmem_id > 0) {
-        syscall1(SYS_IPC_SHMEM_UNMAP, win->shmem_id);
-    }
-    
-    win->active = 0;
-    dirty = 1;
-}
 
-static void focus_window(comp_window_t *win) {
-    if (!win) return;
-    
-    // Unfocus all
-    for (comp_window_t *w = windows_list; w; w = w->next) {
-        w->focused = 0;
-    }
-    win->focused = 1;
-    
-    // Move to end (top)
-    if (win->next) {
-        if (win->prev) win->prev->next = win->next;
-        else windows_list = win->next;
-        win->next->prev = win->prev;
-        
-        comp_window_t *tail = windows_list;
-        while (tail->next) tail = tail->next;
-        tail->next = win;
-        win->prev = tail;
-        win->next = NULL;
-    }
-    
-    dirty = 1;
-}
-
-static comp_window_t *get_window_at(int px, int py) {
-    // Check in reverse z-order (top first)
-    comp_window_t *tail = windows_list;
-    if (!tail) return NULL;
-    while (tail->next) tail = tail->next;
-    
-    for (comp_window_t *w = tail; w; w = w->prev) {
-        if (!w->visible) continue;
-        if (px >= w->x && px < w->x + w->width &&
-            py >= w->y && py < w->y + w->height) {
-            return w;
-        }
-    }
-    return NULL;
-}
 
 static void draw_window(comp_window_t *win) {
     if (!win->visible) return;
@@ -370,7 +459,7 @@ static void draw_window(comp_window_t *win) {
 
 void _start(void) {
     // 1. Get Framebuffer
-    if (syscall1(SYS_GET_FRAMEBUFFER, (long)&fb_info) != 0) {
+    if (syscall1(SYS_GET_FRAMEBUFFER, (uint64_t)&fb_info) != 0) {
         syscall1(SYS_EXIT, 1);
     }
     
@@ -382,7 +471,7 @@ void _start(void) {
     if (port <= 0) {
         // Failed to create port
     } else {
-        syscall3(SYS_IPC_REGISTER, port, (long)"compositor", 0);
+        syscall3(SYS_IPC_REGISTER, port, (uint64_t)"compositor", 0);
     }
     
     // 3. Create initial window
@@ -392,110 +481,58 @@ void _start(void) {
     ipc_message_t msg;
     input_event_t evt;
     
-    // Mouse state
-    int last_mouse_x = 0, last_mouse_y = 0;
-    uint32_t last_mouse_buttons = 0;
-    comp_window_t *drag_window = NULL;
-    int drag_off_x = 0, drag_off_y = 0;
-    
     for (;;) {
         // Handle IPC Messages (Non-blocking)
-        long res = syscall3(SYS_IPC_RECV, port, (long)&msg, IPC_RECV_NONBLOCK);
+        long res = syscall3(SYS_IPC_RECV, port, (uint64_t)&msg, IPC_RECV_NONBLOCK);
         if (res == 0) {
-            if (msg.msg_id == MSG_CREATE_WINDOW) {
+            // Check for Window Creation Message
+            // We expect the first word of data to be the Message Type if we are multiplexing
+            // But msg_create_window_t doesn't have a type field at start...
+            // Let's assume msg_id is overwritten by kernel, so we MUST use data payload.
+            
+            // Temporary Hack: Check message size to guess type
+            // Create Window is sizeof(msg_create_window_t) = ~48 bytes
+            // Input Event is sizeof(msg_input_event_t) = 16 bytes
+            
+            if (msg.size == sizeof(msg_create_window_t)) {
                 msg_create_window_t *req = (msg_create_window_t *)msg.data;
                 create_window(req->title, req->x, req->y, req->w, req->h, req->shmem_id, req->reply_port);
             }
+            else if (msg.size == sizeof(msg_input_event_t)) {
+                // Input Event from Driver
+                msg_input_event_t *ievt = (msg_input_event_t *)msg.data;
+                
+                if (ievt->type == 1) { // Keyboard
+                    handle_key_event(ievt->code);
+                } else if (ievt->type == 3) { // Mouse Move
+                    handle_mouse_event(ievt->x, ievt->y, ievt->code);
+                }
+            }
+            else if (msg.size == 0) {
+                // Force Redraw
+                dirty = 1;
+            }
         }
         
-        // Handle Input
-        while (syscall1(SYS_GET_INPUT_EVENT, (long)&evt) == 0) {
+        // Handle Kernel Input (Legacy/Fallback)
+        while (syscall1(SYS_GET_INPUT_EVENT, (uint64_t)&evt) == 1) {
             if (evt.type == 2) { // Mouse
-                mouse_x = evt.x;
-                mouse_y = evt.y;
-                mouse_buttons = evt.code;
-                
-                int clicked = (mouse_buttons & 1) && !(last_mouse_buttons & 1);
-                int released = !(mouse_buttons & 1) && (last_mouse_buttons & 1);
-                
-                if (clicked) {
-                    comp_window_t *hit = get_window_at(mouse_x, mouse_y);
-                    if (hit) {
-                        focus_window(hit);
-                        
-                        // Check if title bar (drag)
-                        if (mouse_y >= hit->y && mouse_y < hit->y + 28) {
-                            // Check Close Button (Top Right)
-                            if (mouse_x >= hit->x + hit->width - 28 && mouse_x <= hit->x + hit->width - 8 &&
-                                mouse_y >= hit->y + 4 && mouse_y <= hit->y + 24) {
-                                destroy_window(hit);
-                                continue;
-                            }
-                            
-                            drag_window = hit;
-                            drag_off_x = mouse_x - hit->x;
-                            drag_off_y = mouse_y - hit->y;
-                        }
-                        
-                        // Forward Click to App
-                        if (hit->reply_port > 0) {
-                            ipc_message_t fwd;
-                            fwd.msg_id = MSG_INPUT_EVENT;
-                            fwd.size = sizeof(msg_input_event_t);
-                            msg_input_event_t *fe = (msg_input_event_t *)fwd.data;
-                            fe->type = EVENT_MOUSE_DOWN;
-                            fe->code = 1; // Left button
-                            fe->x = mouse_x - hit->x;
-                            fe->y = mouse_y - (hit->y + 28); // Content coords
-                            syscall3(SYS_IPC_SEND, hit->reply_port, (long)&fwd, 0);
-                        }
-                    }
-                }
-                
-                if (released) {
-                    drag_window = NULL;
-                }
-                
-                if (mouse_buttons & 1 && drag_window) {
-                    drag_window->x = mouse_x - drag_off_x;
-                    drag_window->y = mouse_y - drag_off_y;
-                    dirty = 1;
-                }
-                
-                last_mouse_buttons = mouse_buttons;
-                if (mouse_x != last_mouse_x || mouse_y != last_mouse_y) dirty = 1;
-                last_mouse_x = mouse_x;
-                last_mouse_y = mouse_y;
-                
+                handle_mouse_event(evt.x, evt.y, evt.code);
             } else if (evt.type == 1) { // Keyboard
-                // Send to focused window
-                comp_window_t *focused = NULL;
-                for (comp_window_t *w = windows_list; w; w = w->next) {
-                    if (w->focused) { focused = w; break; }
-                }
-                
-                if (focused && focused->reply_port > 0) {
-                    ipc_message_t fwd;
-                    fwd.msg_id = MSG_INPUT_EVENT;
-                    fwd.size = sizeof(msg_input_event_t);
-                    msg_input_event_t *fe = (msg_input_event_t *)fwd.data;
-                    fe->type = EVENT_KEY_DOWN;
-                    fe->code = evt.code;
-                    syscall3(SYS_IPC_SEND, focused->reply_port, (long)&fwd, 0);
-                }
+                handle_key_event(evt.code);
             }
         }
         
         // Render if dirty
         if (dirty) {
             // Background
-            for (int y = 0; y < fb_info.height; y++) {
+            for (uint64_t y = 0; y < fb_info.height; y++) {
                 // Gradient
                 int r = 20 + (y * 15) / fb_info.height;
                 int g = 40 + (y * 30) / fb_info.height;
                 int b = 80 + (y * 40) / fb_info.height;
                 uint32_t color = RGB(r, g, b);
-                for (int x = 0; x < fb_info.width; x++) {
+                for (uint64_t x = 0; x < fb_info.width; x++) {
                     back_buffer[y * fb_info.width + x] = color;
                 }
             }

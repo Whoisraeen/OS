@@ -87,7 +87,17 @@ pci_device_t *pci_find_device(uint16_t vendor, uint16_t device);
 // Get number of discovered devices
 int pci_get_device_count(void);
 
+// PCI Capability IDs
+#define PCI_CAP_ID_MSI       0x05
+#define PCI_CAP_ID_MSIX      0x11
+
 // Get device by index
 pci_device_t *pci_get_device(int index);
+
+// Enable MSI for a device
+// vector: Interrupt vector to trigger (e.g., 46)
+// processor: LAPIC ID of the processor to target (e.g., 0 for BSP)
+// Returns 0 on success, -1 on failure
+int pci_enable_msi(pci_device_t *dev, uint8_t vector, uint8_t processor);
 
 #endif

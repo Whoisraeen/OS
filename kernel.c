@@ -28,6 +28,13 @@
 #include "pci.h"
 #include "devfs.h"
 #include "ahci.h"
+#include "block.h"
+#include "partition.h"
+#include "bcache.h"
+#include "ext2.h"
+#include "bga.h"
+#include "string.h"
+#include "klog.h"
 
 // Globals for drivers to access
 uint32_t *fb_ptr = NULL;
@@ -136,6 +143,7 @@ void _start(void) {
 
     // Initialize Serial (for debug output)
     serial_init();
+    klog_init(); // Initialize kernel log buffer
     kprintf("\n[KERNEL] GDT initialized.\n");
 
     // Initialize IDT
@@ -198,33 +206,38 @@ void _start(void) {
     // Initialize AHCI Storage
     ahci_init();
 
-    // Test Disk I/O
-    console_printf("[KERNEL] Allocating buffer for disk test...\n");
-    uint8_t *disk_buf = (uint8_t*)kmalloc(4096);
-    if (disk_buf) {
-        // Write test
-        const char *msg = "RAEENOS DISK TEST SECTOR 0";
-        for (int i=0; i<4096; i++) disk_buf[i] = 0;
-        for (int i=0; msg[i]; i++) disk_buf[i] = msg[i];
-        
-        console_printf("[KERNEL] Writing to disk LBA 0...\n");
-        if (ahci_write(0, 1, disk_buf) == 0) {
-             console_printf("[KERNEL] Write success!\n");
-        } else {
-             console_printf("[KERNEL] Write failed (is disk attached?)\n");
-        }
+    // Initialize BGA Graphics (if available)
+    bga_init();
 
-        // Read test
-        for (int i=0; i<4096; i++) disk_buf[i] = 0;
-        console_printf("[KERNEL] Reading from disk LBA 0...\n");
-        if (ahci_read(0, 1, disk_buf) == 0) {
-            console_printf("[KERNEL] Read success: '%s'\n", (char*)disk_buf);
-        } else {
-            console_printf("[KERNEL] Read failed.\n");
+    // Initialize block device layer and register AHCI
+    block_init();
+
+    // Probe for partitions on sda
+    block_device_t *sda = block_find("sda");
+    if (sda) {
+        partition_probe(sda);
+    }
+
+    // Initialize buffer cache
+    bcache_init();
+
+    // Try to mount ext2 filesystem on first partition
+    block_device_t *sda1 = block_find("sda1");
+    if (sda1) {
+        ext2_root_fs = ext2_mount(sda1);
+        if (ext2_root_fs) {
+            kprintf("[KERNEL] ext2 filesystem mounted on sda1\n");
         }
-        kfree(disk_buf);
-    } else {
-        console_printf("[KERNEL] Failed to allocate disk buffer!\n");
+    }
+    if (!ext2_root_fs) {
+        // Try raw disk (no partition table)
+        block_device_t *sda_raw = block_find("sda");
+        if (sda_raw) {
+            ext2_root_fs = ext2_mount(sda_raw);
+            if (ext2_root_fs) {
+                kprintf("[KERNEL] ext2 filesystem mounted on sda (raw)\n");
+            }
+        }
     }
 
     // Initialize /dev filesystem
@@ -239,9 +252,15 @@ void _start(void) {
     // Initialize syscalls (MSRs)
     syscall_init();
 
+    kprintf("[KERNEL] fb_ptr=%p, width=%lu, height=%lu\n", fb_ptr, fb_width, fb_height);
+
     // Draw the "Sony Blue" background
-    for (size_t i = 0; i < fb_width * fb_height; i++) {
-        fb_ptr[i] = 0xFF003366; 
+    if (fb_ptr) {
+        kprintf("[KERNEL] Clearing screen...\n");
+        for (size_t i = 0; i < fb_width * fb_height; i++) {
+            fb_ptr[i] = 0xFF003366; 
+        }
+        kprintf("[KERNEL] Screen cleared.\n");
     }
 
     // Initialize graphical console
@@ -269,6 +288,62 @@ void _start(void) {
         vfs_root = initrd_init(initrd_file->address, initrd_file->size);
         console_printf(" VFS: Mounted initrd at /\n");
         
+        // Mount disk at /disk
+        if (ext2_root_fs) {
+            if (vfs_mount("/disk", ext2_get_root(ext2_root_fs)) == 0) {
+                console_printf(" VFS: Mounted /dev/sda at /disk\n");
+                
+                // INSTALLATION: Copy initrd files to disk
+                console_printf(" INSTALL: Checking installation...\n");
+                
+                // Check if already installed (look for kernel_installed marker)
+                if (ext2_dir_lookup(ext2_root_fs, EXT2_ROOT_INO, "kernel_installed") == 0) {
+                    console_printf(" INSTALL: First boot detected. Installing system files to disk...\n");
+                    
+                    for (size_t i = 0; ; i++) {
+                        vfs_node_t *node = vfs_readdir(vfs_root, i);
+                        if (node == NULL) break;
+                        
+                        // Skip . and disk
+                        if (strcmp(node->name, ".") == 0 || strcmp(node->name, "..") == 0 || strcmp(node->name, "disk") == 0) {
+                            continue;
+                        }
+                        
+                        console_printf("   - Installing %s... ", node->name);
+                        
+                        // Read file from Initrd
+                        uint8_t *buf = kmalloc(node->length);
+                        if (buf) {
+                            vfs_read(node, 0, node->length, buf);
+                            
+                            // Create on disk
+                            uint32_t ino = ext2_create(ext2_root_fs, EXT2_ROOT_INO, node->name, EXT2_S_IFREG | 0755);
+                            if (ino) {
+                                ext2_inode_t inode;
+                                ext2_read_inode(ext2_root_fs, ino, &inode);
+                                ext2_write_data(ext2_root_fs, ino, &inode, 0, node->length, buf);
+                                console_printf("OK\n");
+                            } else {
+                                console_printf("FAILED (Create)\n");
+                            }
+                            kfree(buf);
+                        } else {
+                            console_printf("FAILED (OOM)\n");
+                        }
+                    }
+                    
+                    // Create marker file
+                    ext2_create(ext2_root_fs, EXT2_ROOT_INO, "kernel_installed", EXT2_S_IFREG | 0644);
+                    ext2_sync(ext2_root_fs);
+                    console_printf(" INSTALL: Installation Complete.\n");
+                } else {
+                    console_printf(" INSTALL: System already installed.\n");
+                }
+            } else {
+                 console_printf(" VFS: Failed to mount /disk\n");
+            }
+        }
+
         // List files in initrd
         console_printf("\n Files in initrd:\n");
         for (size_t i = 0; ; i++) {
@@ -277,34 +352,36 @@ void _start(void) {
             console_printf("   - %s (%lu bytes)\n", node->name, node->length);
         }
         
-        // Try to read hello.txt
-        vfs_node_t *hello = initrd_find("hello.txt");
-        if (hello != NULL) {
-            console_printf("\n Contents of hello.txt:\n   ");
-            uint8_t buffer[256];
-            size_t read = vfs_read(hello, 0, 255, buffer);
-            buffer[read] = '\0';
-            console_printf("%s\n", (char *)buffer);
-        }
-        
-        // Launch init process
-        vfs_node_t *init_node = initrd_find("init.elf");
-        if (init_node) {
-            console_printf("[KERNEL] Found init.elf, loading...\n");
-            void *init_data = kmalloc(init_node->length);
-            if (init_data) {
-                vfs_read(init_node, 0, init_node->length, (uint8_t*)init_data);
+        // Launch Service Manager
+        vfs_node_t *sm_node = initrd_find("service_manager.elf");
+        if (sm_node) {
+            console_printf("[KERNEL] Found service_manager.elf, loading...\n");
+            void *sm_data = kmalloc(sm_node->length);
+            if (sm_data) {
+                vfs_read(sm_node, 0, sm_node->length, (uint8_t*)sm_data);
                 
-                int pid = task_create_user("init", init_data, init_node->length);
+                int pid = task_create_user("service_manager", sm_data, sm_node->length);
                 if (pid >= 0) {
-                    console_printf("[KERNEL] Init process started (PID %d)\n", pid);
+                    console_printf("[KERNEL] Service Manager started (PID %d)\n", pid);
                 } else {
-                    console_printf("[KERNEL] Failed to start init process\n");
+                    console_printf("[KERNEL] Failed to start Service Manager\n");
                 }
-                kfree(init_data);
+                kfree(sm_data);
             }
         } else {
-            console_printf("[KERNEL] init.elf not found in initrd!\n");
+            console_printf("[KERNEL] service_manager.elf not found in initrd!\n");
+            
+            // Fallback to init.elf
+            vfs_node_t *init_node = initrd_find("init.elf");
+            if (init_node) {
+                 console_printf("[KERNEL] Falling back to init.elf...\n");
+                 void *init_data = kmalloc(init_node->length);
+                 if (init_data) {
+                     vfs_read(init_node, 0, init_node->length, (uint8_t*)init_data);
+                     task_create_user("init", init_data, init_node->length);
+                     kfree(init_data);
+                 }
+            }
         }
         
         // Compositor is now launched by init

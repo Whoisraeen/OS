@@ -19,6 +19,9 @@
 #define AHCI_GHC_IE    (1 << 1)   // Interrupt Enable
 #define AHCI_GHC_HR    (1 << 0)   // HBA Reset
 
+// CAP Bits
+#define AHCI_CAP_SCLO  (1 << 24)  // Supports Command List Override
+
 // Port Registers (0x100 + port * 0x80)
 #define AHCI_PORT_CLB  0x00       // Command List Base
 #define AHCI_PORT_CLBU 0x04       // Command List Base Upper
@@ -39,6 +42,7 @@
 #define AHCI_CMD_ST    (1 << 0)   // Start
 #define AHCI_CMD_SUD   (1 << 1)   // Spin-Up Device
 #define AHCI_CMD_POD   (1 << 2)   // Power On Device
+#define AHCI_CMD_CLO   (1 << 3)   // Command List Override
 #define AHCI_CMD_FRE   (1 << 4)   // FIS Receive Enable
 #define AHCI_CMD_FR    (1 << 14)  // FIS Receive Running
 #define AHCI_CMD_CR    (1 << 15)  // Command List Running
