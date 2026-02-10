@@ -64,7 +64,6 @@ void _start(void) {
             // 3. Send Request
             // <URL><CR><LF>
             char req[256];
-            int len = 0;
             // strcpy(req, url); ...
             req[0] = '\r'; req[1] = '\n'; req[2] = 0;
             

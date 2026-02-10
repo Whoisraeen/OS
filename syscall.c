@@ -23,6 +23,33 @@
 #include "acpi.h"
 #include "driver.h"
 #include "ext2.h"
+#include "net/include/lwip/tcp.h"
+#include "net/include/lwip/ip.h"
+
+// Basic Socket Implementation
+typedef struct {
+    struct tcp_pcb *pcb;
+    int type; // 1=STREAM, 2=DGRAM
+    int state;
+    // Minimal receive buffer for demo
+    char recv_buf[1024];
+    int recv_head;
+    int recv_tail;
+} socket_t;
+
+typedef struct {
+    uint16_t sin_family;
+    uint16_t sin_port;
+    uint32_t sin_addr;
+    char sin_zero[8];
+} sockaddr_in_t;
+
+// Callback for TCP connection
+static err_t tcp_connected_cb(void *arg, struct tcp_pcb *pcb, err_t err) {
+    (void)arg; (void)pcb; (void)err;
+    // In a real system, we would wake up the waiting process
+    return 0;
+}
 
 // MSR registers
 #define MSR_EFER     0xC0000080
@@ -905,27 +932,98 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             return ret;
         }
         
-        // === Socket Syscalls (Stubbed for now, waiting for lwIP core) ===
+        // === Socket Syscalls ===
         case SYS_SOCKET: {
             // arg1 = domain, arg2 = type, arg3 = protocol
-            // kprintf("[SYSCALL] socket(%d, %d, %d)\n", arg1, arg2, arg3);
-            return (uint64_t)-1; // ENOSYS
+            // Only AF_INET(2) + SOCK_STREAM(1) supported for now
+            if (arg1 != 2 || arg2 != 1) return (uint64_t)-1; 
+
+            task_t *current_task = task_get_by_id(current_pid);
+            if (!current_task) return (uint64_t)-1;
+
+            fd_table_t *table = current_task->fd_table;
+            int fd = fd_alloc(table);
+            if (fd < 0) return (uint64_t)-1;
+
+            socket_t *sock = kmalloc(sizeof(socket_t));
+            if (!sock) {
+                fd_free(table, fd);
+                return (uint64_t)-1;
+            }
+            memset(sock, 0, sizeof(socket_t));
+            sock->type = arg2;
+            sock->pcb = tcp_new();
+            if (!sock->pcb) {
+                kfree(sock);
+                fd_free(table, fd);
+                return (uint64_t)-1;
+            }
+
+            fd_entry_t *entry = fd_get(table, fd);
+            entry->type = FD_SOCKET;
+            entry->socket = sock;
+            entry->flags = O_RDWR;
+
+            kprintf("[SYSCALL] socket created fd=%d\n", fd);
+            return (uint64_t)fd;
         }
         
         case SYS_CONNECT: {
             // arg1 = fd, arg2 = addr, arg3 = addrlen
-            // kprintf("[SYSCALL] connect(%d, %p, %d)\n", arg1, arg2, arg3);
-            return (uint64_t)-1;
+            task_t *current_task = task_get_by_id(current_pid);
+            if (!current_task) return (uint64_t)-1;
+
+            fd_table_t *table = current_task->fd_table;
+            fd_entry_t *entry = fd_get(table, (int)arg1);
+            if (!entry || entry->type != FD_SOCKET) return (uint64_t)-1;
+
+            sockaddr_in_t addr;
+            if (copy_from_user(&addr, (void*)arg2, sizeof(sockaddr_in_t)) < 0) return (uint64_t)-1;
+
+            socket_t *sock = (socket_t*)entry->socket;
+            if (!sock || !sock->pcb) return (uint64_t)-1;
+
+            kprintf("[SYSCALL] connect to %08x:%d\n", addr.sin_addr, addr.sin_port);
+            tcp_connect(sock->pcb, addr.sin_addr, addr.sin_port, tcp_connected_cb);
+            
+            return 0;
         }
         
         case SYS_SEND: {
             // arg1 = fd, arg2 = buf, arg3 = len
-            return (uint64_t)-1;
+            task_t *current_task = task_get_by_id(current_pid);
+            if (!current_task) return (uint64_t)-1;
+
+            fd_table_t *table = current_task->fd_table;
+            fd_entry_t *entry = fd_get(table, (int)arg1);
+            if (!entry || entry->type != FD_SOCKET) return (uint64_t)-1;
+
+            socket_t *sock = (socket_t*)entry->socket;
+            
+            void *kbuf = kmalloc(arg3);
+            if (!kbuf) return (uint64_t)-1;
+            
+            if (copy_from_user(kbuf, (void*)arg2, arg3) < 0) {
+                kfree(kbuf);
+                return (uint64_t)-1;
+            }
+
+            tcp_write(sock->pcb, kbuf, arg3, 0);
+            kfree(kbuf);
+            return arg3;
         }
         
         case SYS_RECV: {
             // arg1 = fd, arg2 = buf, arg3 = len
-            return (uint64_t)-1;
+            task_t *current_task = task_get_by_id(current_pid);
+            if (!current_task) return (uint64_t)-1;
+
+            fd_table_t *table = current_task->fd_table;
+            fd_entry_t *entry = fd_get(table, (int)arg1);
+            if (!entry || entry->type != FD_SOCKET) return (uint64_t)-1;
+            
+            // Mock recv: return 0
+            return 0;
         }
         
         case SYS_BIND:

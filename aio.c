@@ -2,6 +2,7 @@
 #include "sched.h"
 #include "heap.h"
 #include "console.h"
+#include "serial.h"
 #include "vfs.h"
 #include "fd.h"
 #include "spinlock.h"

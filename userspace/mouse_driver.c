@@ -19,7 +19,7 @@ static int mouse_x = 100;
 static int mouse_y = 100;
 static uint8_t mouse_cycle = 0;
 static int8_t mouse_bytes[3];
-static uint8_t last_buttons = 0;
+// static uint8_t last_buttons = 0;
 
 // Wait for mouse controller
 static void mouse_wait(int type) {

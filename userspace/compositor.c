@@ -413,7 +413,7 @@ static void handle_mouse_event(int x, int y, uint32_t buttons) {
         if (drag_window) {
             // Snapping
             if (mouse_x <= 10) snap_window(drag_window, 1); // Left
-            else if (mouse_x >= fb_info.width - 10) snap_window(drag_window, 2); // Right
+            else if (mouse_x >= (int)fb_info.width - 10) snap_window(drag_window, 2); // Right
             else if (mouse_y <= 10) snap_window(drag_window, 3); // Maximize
         }
         drag_window = NULL;

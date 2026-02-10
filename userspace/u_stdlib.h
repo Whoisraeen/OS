@@ -76,7 +76,7 @@ static void free(void *ptr) {
     // We'll skip prev-merge for this simple implementation
 }
 
-static void *realloc(void *ptr, size_t size) {
+static inline void *realloc(void *ptr, size_t size) {
     if (!ptr) return malloc(size);
     if (size == 0) {
         free(ptr);
@@ -101,6 +101,7 @@ static void *realloc(void *ptr, size_t size) {
 
 // String Utils
 static inline int snprintf(char *buf, size_t size, const char *fmt, ...) {
+    (void)fmt;
     // Stub
     if (size > 0) {
         buf[0] = 'M'; buf[1] = 's'; buf[2] = 'g'; buf[3] = 0;

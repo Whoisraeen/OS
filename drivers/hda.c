@@ -41,6 +41,7 @@ static void hda_write16(uint32_t reg, uint16_t val) {
     *(volatile uint16_t *)(hda.mmio_base + reg) = val;
 }
 
+/*
 static uint8_t hda_read8(uint32_t reg) {
     return *(volatile uint8_t *)(hda.mmio_base + reg);
 }
@@ -48,6 +49,7 @@ static uint8_t hda_read8(uint32_t reg) {
 static void hda_write8(uint32_t reg, uint8_t val) {
     *(volatile uint8_t *)(hda.mmio_base + reg) = val;
 }
+*/
 
 static void hda_reset_controller(void) {
     uint32_t gctl = hda_read32(HDA_GCTL);
