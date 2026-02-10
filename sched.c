@@ -235,7 +235,7 @@ int task_create_user(const char *name, const void *elf_data, size_t size, uint32
 
     for (uint64_t addr = user_stack_base; addr < user_stack_top; addr += 4096) {
         uint64_t phys = (uint64_t)pmm_alloc_page();
-        vmm_map_page(addr, phys, 0x07); // User | RW | Present
+        vmm_map_user_page(addr, phys); // Uses current CR3 = user PML4
     }
 
     // Restore CR3

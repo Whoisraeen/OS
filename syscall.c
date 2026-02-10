@@ -114,6 +114,9 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
                           struct interrupt_frame *regs) {
     // Get real PID from scheduler (not hardcoded!)
     uint32_t current_pid = task_current_id();
+    
+    // DEBUG: Trace syscalls
+    // kprintf("[SYSCALL] PID %u called sys_%lu(%lx, %lx, %lx)\n", current_pid, num, arg1, arg2, arg3);
 
     switch (num) {
         case SYS_EXIT:

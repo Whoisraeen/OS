@@ -3,7 +3,12 @@
 #include "syscalls.h"
 #include "u_stdlib.h"
 
+// Utils moved to u_stdlib.h
+
 void _start(void) {
+    // Debug: Simple loop to verify we reached user mode
+    // syscall3(SYS_WRITE, 1, (long)"[SM] ALIVE\n", 12);
+    
     const char *msg = "[SM] Service Manager (PID 1) Started.\n";
     syscall3(SYS_WRITE, 1, (long)msg, 38);
 

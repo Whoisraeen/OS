@@ -101,8 +101,12 @@ static void print_num(uint64_t num, int base, int width, char pad) {
 }
 
 void kprintf(const char *fmt, ...) {
+    // Save interrupt state and disable — prevents preemption while holding
+    // serial_lock, which would deadlock if the new task also calls kprintf
+    uint64_t rflags;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(rflags));
     spinlock_acquire(&serial_lock);
-    
+
     va_list args;
     va_start(args, fmt);
     
@@ -210,4 +214,6 @@ void kprintf(const char *fmt, ...) {
     
     va_end(args);
     spinlock_release(&serial_lock);
+    // Restore interrupt state (re-enables interrupts if they were enabled before)
+    __asm__ volatile("push %0; popfq" : : "r"(rflags) : "memory");
 }

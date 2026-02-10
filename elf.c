@@ -307,36 +307,25 @@ uint64_t elf_load_user(const void *data, size_t size) {
             mem_set(kptr, 0, 4096);
             
             // Calculate which part of the file to copy to this page
-            if (page >= vaddr && page < (vaddr + filesz)) {
-                // This page contains file data
-                uint64_t page_offset = 0;
-                uint64_t file_offset_for_page = offset;
+            uint64_t page_start = page;
+            uint64_t page_end = page + 4096;
+            
+            // Intersection of [page_start, page_end) and [vaddr, vaddr+filesz)
+            uint64_t copy_start = (page_start > vaddr) ? page_start : vaddr;
+            uint64_t copy_end = (page_end < vaddr + filesz) ? page_end : (vaddr + filesz);
+            
+            if (copy_start < copy_end) {
+                uint64_t page_offset = copy_start - page_start;
+                uint64_t file_offset = offset + (copy_start - vaddr);
+                uint64_t copy_len = copy_end - copy_start;
                 
-                if (page == start_page) {
-                    // First page: might start mid-page
-                    page_offset = vaddr & 0xFFF;
-                    file_offset_for_page = offset;
-                } else {
-                    // Subsequent pages: calculate offset into file
-                    file_offset_for_page = offset + (page - vaddr);
-                }
-                
-                // How much to copy?
-                uint64_t bytes_to_copy = 4096 - page_offset;
-                uint64_t bytes_remaining_in_file = offset + filesz - file_offset_for_page;
-                if (bytes_to_copy > bytes_remaining_in_file) {
-                    bytes_to_copy = bytes_remaining_in_file;
-                }
-                
-                if (bytes_to_copy > 0 && file_offset_for_page < size) {
-                    mem_copy((uint8_t*)kptr + page_offset, 
-                             file_data + file_offset_for_page, 
-                             bytes_to_copy);
-                }
+                mem_copy((uint8_t*)kptr + page_offset, 
+                         file_data + file_offset, 
+                         copy_len);
             }
             
-            // Map page to user virtual address with USER | RW | PRESENT (0x07)
-            vmm_map_page(page, phys, 0x07);
+            // Map page to user virtual address (uses current CR3 = user PML4)
+            vmm_map_user_page(page, phys);
         }
     }
     
