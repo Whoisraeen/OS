@@ -41,10 +41,22 @@ void on_shutdown_click(gui_widget_t *w, void *data) {
 }
 
 static void update_clock() {
-    // char buf[32];
-    // uint64_t now = syscall0(SYS_CLOCK_GETTIME);
-    // Format time...
-    // strcpy(clock_label->text, buf);
+    char buf[32];
+    uint64_t now_sec = syscall0(SYS_CLOCK_GETTIME);
+    
+    // Format HH:MM:SS (Assuming UTC for now)
+    // Simple modulo arithmetic
+    uint64_t sec = now_sec % 60;
+    uint64_t min = (now_sec / 60) % 60;
+    uint64_t hour = (now_sec / 3600) % 24;
+    
+    snprintf(buf, 32, "%02d:%02d:%02d", (int)hour, (int)min, (int)sec);
+    
+    // Only update if changed (to avoid flickering if no double buffering on label)
+    if (strcmp(clock_label->text, buf) != 0) {
+        strncpy(clock_label->text, buf, 31);
+        gui_window_update(win);
+    }
 }
 
 void _start(void) {

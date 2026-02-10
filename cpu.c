@@ -82,6 +82,23 @@ void smp_init(void) {
     
     if (smp == NULL) {
         kprintf("[SMP] Request failed (Limine didn't respond)\n");
+        // Fallback: Initialize BSP only
+        cpu_count = 1;
+        cpus = kmalloc(sizeof(cpu_t));
+        if (!cpus) return;
+
+        cpus[0].cpu_id = 0;
+        cpus[0].lapic_id = 0; // Assume 0 for BSP
+        cpus[0].self = (uint64_t)&cpus[0];
+        setup_cpu_gdt(&cpus[0]);
+        
+        // Setup GS for BSP
+        uint64_t gs_base = (uint64_t)&cpus[0];
+        wrmsr(0xC0000101, gs_base);
+        wrmsr(0xC0000102, 0);
+        
+        // Initialize LAPIC
+        lapic_init();
         return;
     }
     
@@ -136,6 +153,7 @@ void smp_init(void) {
 }
 
 int smp_get_cpu_count(void) {
+    if (cpu_count == 0) return 1; // Fallback for BSP if SMP init failed or not yet called
     return cpu_count;
 }
 

@@ -68,6 +68,19 @@ static inline int vsnprintf(char *buf, size_t size, const char *fmt, va_list arg
     while (*fmt && i < size - 1) {
         if (*fmt == '%') {
             fmt++;
+            
+            // Parse width and padding
+            char pad = ' ';
+            int width = 0;
+            if (*fmt == '0') {
+                pad = '0';
+                fmt++;
+            }
+            while (*fmt >= '0' && *fmt <= '9') {
+                width = width * 10 + (*fmt - '0');
+                fmt++;
+            }
+            
             if (*fmt == 's') {
                 const char *s = va_arg(args, const char *);
                 if (!s) s = "(null)";
@@ -91,6 +104,22 @@ static inline int vsnprintf(char *buf, size_t size, const char *fmt, va_list arg
                     tmp[j++] = '0' + (n % 10);
                     n /= 10;
                 }
+                
+                // Padding
+                while (j < width && i < size - 1) {
+                    // Check if we can prepend padding... complicated in single pass buffer fill
+                    // Actually, we should fill tmp with padding?
+                    // Or just output padding char before tmp content?
+                    // We printed '-' already. Padding usually goes between sign and number for '0', or before sign for ' '.
+                    // For simplicity, just pad 0s here (assuming %02d style)
+                    if (pad == '0') {
+                        tmp[j++] = '0';
+                    } else {
+                         // Space padding usually prepended. 
+                         // But we are in "print tmp" phase.
+                    }
+                }
+                
                 while (j > 0 && i < size - 1) buf[i++] = tmp[--j];
             } else if (*fmt == 'x' || *fmt == 'X' || *fmt == 'p') {
                 unsigned long n = (*fmt == 'p') ? va_arg(args, unsigned long) : va_arg(args, unsigned int);

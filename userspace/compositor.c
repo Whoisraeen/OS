@@ -561,7 +561,12 @@ static comp_window_t *create_window(const char *title, int x, int y, int w, int 
     win->shmem_id = shmem_id;
     win->buffer = NULL;
     if (shmem_id > 0) {
-        win->buffer = (uint32_t *)(uintptr_t)syscall1(SYS_IPC_SHMEM_MAP, shmem_id);
+        long addr = syscall1(SYS_IPC_SHMEM_MAP, shmem_id);
+        if (addr == -1) {
+            win->buffer = NULL;
+        } else {
+            win->buffer = (uint32_t *)(uintptr_t)addr;
+        }
     }
     
     // Add to list
@@ -638,6 +643,10 @@ void _start(void) {
         syscall1(SYS_EXIT, 1);
     }
     
+    // Safety check to prevent division by zero
+    if (fb_info.height == 0) fb_info.height = 1;
+    if (fb_info.width == 0) fb_info.width = 1;
+
     fb_ptr = (uint32_t *)fb_info.addr;
     
     // Allocate Back Buffer (Double Buffering)

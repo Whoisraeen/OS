@@ -1,6 +1,7 @@
 #include "console.h"
 #include "font.h"
 #include "serial.h"
+#include "spinlock.h"
 #include <stddef.h>
 #include <stdarg.h>
 

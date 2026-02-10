@@ -206,6 +206,10 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
         }
 
         // Kernel exception: panic
+        
+        // Stop other CPUs to prevent log interleaving
+        // TODO: smp_send_nmi_all();
+        
         console_set_enabled(1);
         if (fb_ptr) {
             for (size_t i = 0; i < fb_width * fb_height; i++)
@@ -215,7 +219,9 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
         console_clear();
         kprintf("*** KERNEL PANIC (%s) ***\n", name);
         kprintf("Error code: 0x%lx\n", frame->err_code);
-        kprintf("RIP: 0x%lx\n", frame->rip);
+        kprintf("RIP: 0x%lx  CS: 0x%lx\n", frame->rip, frame->cs);
+        kprintf("RSP: 0x%lx  SS: 0x%lx\n", frame->rsp, frame->ss);
+        kprintf("RFLAGS: 0x%lx\n", frame->rflags);
         klog_dump();
         for (;;) __asm__("hlt");
     }

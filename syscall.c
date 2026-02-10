@@ -601,6 +601,7 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
                 kprintf("[SYSCALL] exec: bad path pointer 0x%lx\n", arg1);
                 return (uint64_t)-1;
             }
+            kprintf("[SYSCALL] exec: path='%s'\n", path);
 
             // Find file in VFS
             vfs_node_t *node = vfs_open(path, 0);
@@ -608,6 +609,7 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
                 kprintf("[SYSCALL] exec: file not found '%s'\n", path);
                 return (uint64_t)-1;
             }
+            kprintf("[SYSCALL] exec: file found, size=%lu\n", node->length);
 
             // Allocate kernel buffer
             void *data = kmalloc(node->length);
@@ -615,9 +617,11 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
 
             // Read file
             vfs_read(node, 0, node->length, (uint8_t*)data);
+            kprintf("[SYSCALL] exec: file read complete\n");
 
             // Create Task
             int pid = task_create_user(path, data, node->length, current_pid);
+            kprintf("[SYSCALL] exec: task_create_user returned %d\n", pid);
 
             kfree(data);
 

@@ -36,8 +36,8 @@
 [TIMER] PIT initialized at 100 Hz
 [SCHED] SMP Scheduler Initialized (Per-CPU Queues).
 [LAPIC] Calibrating timer...
-[LAPIC] Calibration: 613480 ticks per 10ms (61348 kHz bus)
-[LAPIC] Timer started: periodic at ~100Hz (init=613480)
+[LAPIC] Calibration: 616091 ticks per 10ms (61609 kHz bus)
+[LAPIC] Timer started: periodic at ~100Hz (init=616091)
 [RTC] Initialized (century_reg=50)
 [DRIVER] Driver subsystem initialized
 [KSYMS] Kernel symbol table initialized
@@ -68,3 +68,10 @@
 [SECURITY] Created context for PID 2 (parent=0, caps=0xffffffffffffffff)
 [SCHED] Enqueuing task 2 on CPU 0 (lock=0)
 [SCHED] Created User Task 2 (service_manager) Entry=0x400000
+[SYSCALL] PID 2 called sys_1(1, 400160, 29)
+[SM] Service Manager (PID 1) v2 Started.
+*** KERNEL PANIC (Division Error) ***
+Error code: 0x0
+RIP: 0x0  CS: 0x0
+RSP: 0x0  SS: 0x0
+RFLAGS: 0x0

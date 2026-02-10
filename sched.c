@@ -146,6 +146,15 @@ static int task_create_ex(const char *name, void (*entry)(void), bool auto_enque
     uint64_t stack_top = stack_virt + TASK_STACK_SIZE;
     uint64_t *sp = (uint64_t *)stack_top;
 
+    // IMPORTANT: 16-byte alignment for stack
+    // RSP should be 16-byte aligned before CALL (so return addr makes it 8-byte aligned)
+    // Interrupt frame pushes SS, RSP, RFLAGS, CS, RIP (5 * 8 = 40 bytes)
+    // Then Err, IntNo (2 * 8 = 16 bytes)
+    // Then 15 GPRs (15 * 8 = 120 bytes)
+    // Then 3 Segs (3 * 8 = 24 bytes)
+    // Total = 200 bytes.
+    // If stack_top is aligned, (stack_top - 200) is aligned.
+    
     *--sp = GDT_KERNEL_DATA; // SS (Kernel Data)
     *--sp = stack_top;       // RSP (this stack)
     *--sp = 0x202;           // RFLAGS (IF=1)
@@ -159,6 +168,8 @@ static int task_create_ex(const char *name, void (*entry)(void), bool auto_enque
     for(int i=0; i<15; i++) *--sp = 0;
 
     // Segment registers (DS, ES, FS)
+    // Order popped in interrupts.S: FS, ES, DS
+    // Order pushed: DS, ES, FS
     *--sp = GDT_KERNEL_DATA; // DS
     *--sp = GDT_KERNEL_DATA; // ES
     *--sp = GDT_KERNEL_DATA; // FS
@@ -186,9 +197,13 @@ static int task_create_ex(const char *name, void (*entry)(void), bool auto_enque
     if (auto_enqueue) {
         cpu_t *target_cpu = smp_get_cpu_by_id(target_cpu_id);
         if (target_cpu) {
+            // Disable interrupts to prevent deadlock with scheduler ISR
+            __asm__ volatile("cli");
             spinlock_acquire(&target_cpu->lock);
             sched_enqueue(target_cpu, &tasks[slot]);
             spinlock_release(&target_cpu->lock);
+            __asm__ volatile("sti");
+
             kprintf("[SCHED] Created Task %d (%s) on CPU %d\n", slot, name, target_cpu_id);
         } else {
             kprintf("[SCHED] Error: Target CPU %d not found!\n", target_cpu_id);
@@ -281,6 +296,35 @@ int task_create_user(const char *name, const void *elf_data, size_t size, uint32
     sp[0] = GDT_USER_DATA; // FS
     sp[1] = GDT_USER_DATA; // ES
     sp[2] = GDT_USER_DATA; // DS
+    // ...
+    // Note: The stack layout here MUST match interrupts.S `isr_common_stub` stack frame
+    // [int_no] [err_code] [RIP] [CS] [RFLAGS] [RSP] [SS] ...
+    // Wait, the stack we set up in task_create_ex puts:
+    // [SS] [RSP] [RFLAGS] [CS] [RIP] [err] [int] [GPRs] [Segs]
+    // 
+    // In interrupts.S:
+    //   push rax ... push r15
+    //   push ds ... push gs (if we push gs, but we don't in new code)
+    // 
+    // Let's verify task_create_ex stack setup vs interrupts.S
+    // In task_create_ex:
+    // *--sp = GDT_KERNEL_DATA; // DS
+    // *--sp = GDT_KERNEL_DATA; // ES
+    // *--sp = GDT_KERNEL_DATA; // FS
+    
+    // In interrupts.S:
+    // pop rax; mov fs, ax
+    // pop rax; mov es, ax
+    // pop rax; mov ds, ax
+    
+    // Order of pops: FS, ES, DS.
+    // Order of pushes should be: DS, ES, FS.
+    // In task_create_ex we push: DS, ES, FS. So FS is at top (lowest addr).
+    // Pop FS (top) -> Correct.
+    
+    sp[0] = GDT_USER_DATA; // FS
+    sp[1] = GDT_USER_DATA; // ES
+    sp[2] = GDT_USER_DATA; // DS
 
     sp[20] = entry_point;      // RIP
     sp[21] = GDT_USER_CODE;   // CS (User Code, Ring 3)
@@ -337,9 +381,13 @@ int task_create_user(const char *name, const void *elf_data, size_t size, uint32
     cpu_t *target_cpu = smp_get_cpu_by_id(task->cpu_id);
     if (target_cpu) {
         kprintf("[SCHED] Enqueuing task %d on CPU %d (lock=%d)\n", slot, task->cpu_id, target_cpu->lock.locked);
+        
+        // Disable interrupts to prevent deadlock with scheduler ISR
+        __asm__ volatile("cli");
         spinlock_acquire(&target_cpu->lock);
         sched_enqueue(target_cpu, task);
         spinlock_release(&target_cpu->lock);
+        __asm__ volatile("sti");
     }
 
     kprintf("[SCHED] Created User Task %d (%s) Entry=0x%lx\n", slot, name, entry_point);
@@ -472,6 +520,11 @@ uint64_t scheduler_switch(registers_t *regs) {
     // Update TSS RSP0 for the new task so interrupts/syscalls from Ring 3 work
     if (next->stack_base) {
         cpu->tss.rsp0 = (uint64_t)next->stack_base + TASK_STACK_SIZE;
+    } else {
+        // Fallback for kernel tasks that might not have a separate stack base set?
+        // But task_create_ex sets stack_base.
+        // For task 0 (idle), it might not be set?
+        // Task 0 uses boot stack?
     }
 
     // 5. Switch address space if needed

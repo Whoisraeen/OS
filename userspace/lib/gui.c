@@ -36,7 +36,14 @@ typedef struct {
 static long comp_port = 0;
 
 void gui_init(void) {
-    comp_port = syscall1(SYS_IPC_LOOKUP, (long)"compositor");
+    while (comp_port <= 0) {
+        comp_port = syscall1(SYS_IPC_LOOKUP, (long)"compositor");
+        if (comp_port <= 0) {
+             // Yield and retry
+             syscall1(SYS_YIELD, 0);
+             for(volatile int i=0; i<1000000; i++);
+        }
+    }
 }
 
 static uint32_t blend(uint32_t fg, uint32_t bg) {
@@ -135,6 +142,13 @@ gui_window_t *gui_create_window(const char *title, int width, int height) {
     
     win->shmem_id = shmem_id;
     win->buffer = (uint32_t *)syscall2(SYS_IPC_SHMEM_MAP, shmem_id, 0);
+    if ((long)win->buffer == -1) {
+        // Retry logic for shmem mapping?
+        // For now, fail hard to debug
+        // printf("GUI: Failed to map shmem %d\n", shmem_id);
+        free(win);
+        return NULL;
+    }
     
     // Clear Buffer
     for (size_t i = 0; i < (size_t)(width * height); i++) win->buffer[i] = win->bg_color;
