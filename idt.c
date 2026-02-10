@@ -219,6 +219,13 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
         return (uint64_t)frame;
     }
 
+    // ---- E1000 MSI (Vector 47) ----
+    if (frame->int_no == 47) {
+        e1000_isr();
+        if (lapic_is_ioapic_mode()) lapic_eoi();
+        return (uint64_t)frame;
+    }
+
     // ---- Spurious vector (0xFF = 255) — no EOI needed ----
     if (frame->int_no == 0xFF) {
         return (uint64_t)frame;

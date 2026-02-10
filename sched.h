@@ -73,7 +73,7 @@ typedef struct task_t {
 // API
 void scheduler_init(void);
 int task_create(const char *name, void (*entry)(void));
-int task_create_user(const char *name, const void *elf_data, size_t size);
+int task_create_user(const char *name, const void *elf_data, size_t size, uint32_t parent_pid);
 void task_exit(void);
 void task_yield(void);
 uint32_t task_current_id(void);

@@ -69,5 +69,6 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
 #define SYS_MAP_PHYS     68
 #define SYS_AIO_SUBMIT   69
 #define SYS_AIO_WAIT     70
+#define SYS_SEC_GRANT    71
 
 #endif

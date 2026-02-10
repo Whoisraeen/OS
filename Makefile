@@ -29,7 +29,7 @@ SRCS = kernel.c gdt.c idt.c pic.c keyboard.c pmm.c vmm.c heap.c serial.c \
        spinlock.c cpu.c lapic.c mutex.c semaphore.c fd.c pipe.c signal.c \
        futex.c vm_area.c acpi.c ioapic.c rtc.c driver.c pci.c dma.c \
        devfs.c ahci.c bga.c block.c partition.c bcache.c ext2.c klog.c ksyms.c \
-       aio.c
+       aio.c drivers/e1000.c
 
 OBJS = $(SRCS:.c=.o) interrupts.o
 

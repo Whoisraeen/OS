@@ -28,6 +28,7 @@
 #include "pci.h"
 #include "devfs.h"
 #include "ahci.h"
+#include "drivers/e1000.h"
 #include "block.h"
 #include "partition.h"
 #include "bcache.h"
@@ -571,14 +572,14 @@ void _start(void) {
         }
         
         // Launch Service Manager
-        vfs_node_t *sm_node = vfs_finddir(vfs_root, "compositor.elf");
+        vfs_node_t *sm_node = vfs_finddir(vfs_root, "service_manager.elf");
         if (sm_node) {
-            console_printf("[KERNEL] Found compositor.elf, loading...\n");
+            console_printf("[KERNEL] Found service_manager.elf, loading...\n");
             void *sm_data = kmalloc(sm_node->length);
             if (sm_data) {
                 vfs_read(sm_node, 0, sm_node->length, (uint8_t*)sm_data);
                 
-                int pid = task_create_user("compositor", sm_data, sm_node->length);
+                int pid = task_create_user("service_manager", sm_data, sm_node->length, 0);
                 if (pid >= 0) {
                     console_printf("[KERNEL] Service Manager started (PID %d)\n", pid);
                 } else {
@@ -596,7 +597,7 @@ void _start(void) {
                  void *init_data = kmalloc(init_node->length);
                  if (init_data) {
                      vfs_read(init_node, 0, init_node->length, (uint8_t*)init_data);
-                     task_create_user("init", init_data, init_node->length);
+                     task_create_user("init", init_data, init_node->length, 0);
                      kfree(init_data);
                  }
             }

@@ -133,6 +133,12 @@ bool security_has_capability(uint32_t pid, capability_t cap) {
     if (pid == 0) {
         return true;
     }
+    
+    // Service Manager (PID 1) also gets full privileges (or at least Admin)
+    // This allows it to grant capabilities to other services
+    if (pid == 1) {
+        return true;
+    }
 
     // Check if capability bit is set
     return (ctx->capabilities & cap) != 0;

@@ -8,7 +8,8 @@
 #define AIO_OP_WRITE  2
 
 // AIO Request Structure
-typedef struct {
+// We use a named struct tag to avoid forward declaration issues
+typedef struct aio_request {
     uint64_t aio_id;      // Unique ID for this request
     int fd;               // File descriptor
     void *buf;            // Buffer pointer

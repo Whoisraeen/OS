@@ -21,6 +21,8 @@ void _start(void) {
     const char *kbd_path = "keyboard_driver.elf";
     long kbd_pid = syscall1(SYS_PROC_EXEC, (long)kbd_path);
     if (kbd_pid > 0) {
+         // CAP_HW_INPUT (24)
+         syscall2(SYS_SEC_GRANT, kbd_pid, (1ULL << 24));
          syscall3(SYS_WRITE, 1, (long)"[SM] Started Keyboard Driver.\n", 30);
     }
 
@@ -28,6 +30,8 @@ void _start(void) {
     const char *mouse_path = "mouse_driver.elf";
     long mouse_pid = syscall1(SYS_PROC_EXEC, (long)mouse_path);
     if (mouse_pid > 0) {
+         // CAP_HW_INPUT (24)
+         syscall2(SYS_SEC_GRANT, mouse_pid, (1ULL << 24));
          syscall3(SYS_WRITE, 1, (long)"[SM] Started Mouse Driver.\n", 27);
     }
     

@@ -56,6 +56,7 @@
 #define SYS_MAP_PHYS     68
 #define SYS_AIO_SUBMIT   69
 #define SYS_AIO_WAIT     70
+#define SYS_SEC_GRANT    71
 
 // IPC Constants
 #define IPC_PORT_FLAG_RECEIVE (1 << 1)

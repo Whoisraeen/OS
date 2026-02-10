@@ -22,7 +22,6 @@
 #include "acpi.h"
 #include "driver.h"
 #include "ext2.h"
-#include "aio.h"
 
 // MSR registers
 #define MSR_EFER     0xC0000080
@@ -561,7 +560,7 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             vfs_read(node, 0, node->length, (uint8_t*)data);
 
             // Create Task
-            int pid = task_create_user(path, data, node->length);
+            int pid = task_create_user(path, data, node->length, current_pid);
 
             kfree(data);
 
@@ -670,6 +669,11 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             security_context_t *ctx = security_get_context(current_pid);
             if (ctx) return ctx->capabilities;
             return 0;
+        }
+
+        case SYS_SEC_GRANT: {
+            // arg1 = target_pid, arg2 = capability
+            return (uint64_t)security_grant_capability(current_pid, (uint32_t)arg1, (capability_t)arg2);
         }
 
         // === Time & Power Syscalls ===

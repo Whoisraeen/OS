@@ -306,7 +306,7 @@ int task_create_user(const char *name, const void *elf_data, size_t size) {
     }
 
     // 6. Create security context for this process
-    security_create_context(slot, 0); // parent=kernel
+    security_create_context(slot, parent_pid);
 
     // 7. NOW enqueue the fully-initialized task
     cpu_t *target_cpu = smp_get_cpu_by_id(task->cpu_id);
