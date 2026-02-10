@@ -243,7 +243,7 @@ void acpi_init(void) {
         return;
     }
 
-    acpi_rsdp_t *rsdp = (acpi_rsdp_t *)(uintptr_t)rsdp_request.response->address;
+    acpi_rsdp_t *rsdp = (acpi_rsdp_t *)acpi_phys_to_virt((uintptr_t)rsdp_request.response->address);
 
     // Validate RSDP signature
     const char *expected = "RSD PTR ";
