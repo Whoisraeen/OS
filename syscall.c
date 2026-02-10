@@ -904,6 +904,34 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             }
             return ret;
         }
+        
+        // === Socket Syscalls (Stubbed for now, waiting for lwIP core) ===
+        case SYS_SOCKET: {
+            // arg1 = domain, arg2 = type, arg3 = protocol
+            // kprintf("[SYSCALL] socket(%d, %d, %d)\n", arg1, arg2, arg3);
+            return (uint64_t)-1; // ENOSYS
+        }
+        
+        case SYS_CONNECT: {
+            // arg1 = fd, arg2 = addr, arg3 = addrlen
+            // kprintf("[SYSCALL] connect(%d, %p, %d)\n", arg1, arg2, arg3);
+            return (uint64_t)-1;
+        }
+        
+        case SYS_SEND: {
+            // arg1 = fd, arg2 = buf, arg3 = len
+            return (uint64_t)-1;
+        }
+        
+        case SYS_RECV: {
+            // arg1 = fd, arg2 = buf, arg3 = len
+            return (uint64_t)-1;
+        }
+        
+        case SYS_BIND:
+        case SYS_LISTEN:
+        case SYS_ACCEPT:
+            return (uint64_t)-1;
 
         default:
             kprintf("[SYSCALL] Unknown #%lu from PID %u\n", num, current_pid);

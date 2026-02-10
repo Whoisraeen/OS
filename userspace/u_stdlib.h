@@ -99,4 +99,12 @@ static void *realloc(void *ptr, size_t size) {
     return new_ptr;
 }
 
+// String Utils
+static inline int snprintf(char *buf, size_t size, const char *fmt, ...) {
+    // Stub
+    if (size > 0) {
+        buf[0] = 'M'; buf[1] = 's'; buf[2] = 'g'; buf[3] = 0;
+    }
+    return 3;
+}
 #endif // U_STDLIB_H

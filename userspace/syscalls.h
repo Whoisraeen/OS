@@ -58,12 +58,32 @@
 #define SYS_AIO_WAIT     70
 #define SYS_SEC_GRANT    71
 
+// Socket Syscalls
+#define SYS_SOCKET       80
+#define SYS_BIND         81
+#define SYS_LISTEN       82
+#define SYS_ACCEPT       83
+#define SYS_CONNECT      84
+#define SYS_SEND         85
+#define SYS_RECV         86
+
 // IPC Constants
 #define IPC_PORT_FLAG_RECEIVE (1 << 1)
 #define IPC_PORT_FLAG_SEND    (1 << 2)
 #define IPC_RECV_NONBLOCK     (1 << 0)
 
 // Syscall Wrappers
+static inline long syscall0(long num) {
+    long ret;
+    __asm__ volatile (
+        "syscall"
+        : "=a"(ret)
+        : "a"(num)
+        : "rcx", "r11", "memory"
+    );
+    return ret;
+}
+
 static inline long syscall1(long num, long arg1) {
     long ret;
     __asm__ volatile (

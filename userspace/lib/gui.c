@@ -1,20 +1,36 @@
+#include <stdint.h>
+#include <stddef.h>
+// #include <string.h> // Do not include standard string.h if we don't link with libc
 #include "gui.h"
 #include "../u_stdlib.h"
 #include "../font.h" // We assume font.h is available in include path
 
-// Standard helpers if not in u_stdlib
-static inline size_t strlen(const char *str) {
+static size_t strlen(const char *str) {
     size_t len = 0;
     while (str[len]) len++;
     return len;
 }
 
-static inline void strncpy(char *dest, const char *src, size_t n) {
+static void *memset(void *s, int c, size_t n) {
+    unsigned char *p = s;
+    while (n--) *p++ = (unsigned char)c;
+    return s;
+}
+
+static void *memcpy(void *dest, const void *src, size_t n) {
+    char *d = dest;
+    const char *s = src;
+    while (n--) *d++ = *s++;
+    return dest;
+}
+
+static char *strncpy(char *dest, const char *src, size_t n) {
     size_t i;
     for (i = 0; i < n && src[i] != '\0'; i++)
         dest[i] = src[i];
     for ( ; i < n; i++)
         dest[i] = '\0';
+    return dest;
 }
 
 // IPC Structs
@@ -106,186 +122,233 @@ void gui_draw_char(gui_window_t *win, int x, int y, char c, uint32_t color) {
 }
 
 void gui_draw_text(gui_window_t *win, int x, int y, const char *text, uint32_t color) {
-    int cx = x;
+    int cur_x = x;
     while (*text) {
-        gui_draw_char(win, cx, y, *text, color);
-        cx += 8;
+        gui_draw_char(win, cur_x, y, *text, color);
+        cur_x += FONT_WIDTH;
         text++;
     }
 }
 
-gui_window_t *gui_create_window(const char *title, int x, int y, int w, int h) {
-    if (comp_port <= 0) gui_init();
-    if (comp_port <= 0) return NULL;
+// ============================================================================
+// Widget System Implementation
+// ============================================================================
+
+static void gui_draw_widget(gui_window_t *win, gui_widget_t *w);
+
+gui_window_t *gui_create_window(const char *title, int width, int height) {
+    if (comp_port == 0) gui_init();
     
-    gui_window_t *win = (gui_window_t *)malloc(sizeof(gui_window_t));
+    gui_window_t *win = malloc(sizeof(gui_window_t));
     if (!win) return NULL;
     
-    win->width = w;
-    win->height = h;
-    win->widgets = NULL;
-    win->should_close = 0;
+    memset(win, 0, sizeof(gui_window_t));
+    win->base.type = WIDGET_WINDOW;
+    win->base.w = width;
+    win->base.h = height;
+    win->width = width;
+    win->height = height;
+    win->bg_color = COLOR_WHITE;
+    strncpy(win->title, title, 63);
     
     // Create Shmem
-    int buf_size = w * h * 4;
-    win->shmem_id = syscall2(SYS_IPC_SHMEM_CREATE, buf_size, 0);
-    win->buffer = (uint32_t *)syscall1(SYS_IPC_SHMEM_MAP, win->shmem_id);
+    size_t size = width * height * 4;
+    uint32_t shmem_id = syscall2(SYS_IPC_SHMEM_CREATE, size, 1); // 1=Writable
+    if ((int)shmem_id < 0) {
+        free(win);
+        return NULL;
+    }
+    
+    win->shmem_id = shmem_id;
+    win->buffer = (uint32_t *)syscall2(SYS_IPC_SHMEM_MAP, shmem_id, 0);
+    
+    // Clear Buffer
+    for (size_t i = 0; i < width * height; i++) win->buffer[i] = win->bg_color;
     
     // Create Reply Port
-    win->reply_port = syscall1(SYS_IPC_CREATE, IPC_PORT_FLAG_RECEIVE);
+    int reply_port = syscall1(SYS_IPC_CREATE, 0);
+    win->event_port = reply_port;
     
-    // Clear Buffer (White)
-    for (int i = 0; i < w * h; i++) win->buffer[i] = GUI_COLOR_WINDOW;
-    
-    // Send Create Message
+    // Send Create Message to Compositor
     msg_create_window_t req;
     strncpy(req.title, title, 63);
-    req.x = x; req.y = y; req.w = w; req.h = h;
-    req.shmem_id = win->shmem_id;
-    req.reply_port = win->reply_port;
+    req.x = 100; // Default pos
+    req.y = 100;
+    req.w = width;
+    req.h = height;
+    req.shmem_id = shmem_id;
+    req.reply_port = reply_port;
     
-    // We send raw bytes as data, but msg_id is handled by kernel?
-    // Wait, our IPC syscall takes a pointer to struct.
-    // The struct has msg_id.
     ipc_message_t msg;
-    msg.msg_id = 1; // Create Window? Needs to match Compositor expectations.
-    // Compositor checks msg.size == sizeof(msg_create_window_t).
+    msg.msg_id = 100; // CREATE_WINDOW
+    msg.reply_port = reply_port;
+    msg.size = sizeof(req);
+    memcpy(msg.data, &req, sizeof(req));
     
-    // We need to pack the req into msg.data
-    // Or send req directly if syscall supports arbitrary buffer?
-    // Syscall sends (msg, size).
-    // The compositor expects a FULL ipc_message_t wrapper or just the payload?
-    // Userspace compositor:
-    // if (msg.size == sizeof(msg_create_window_t)) ...
-    // So it expects the payload in msg.data.
-    
-    msg.size = sizeof(msg_create_window_t);
-    // Copy req to msg.data
-    char *d = (char *)msg.data;
-    char *s = (char *)&req;
-    for(size_t i=0; i<sizeof(msg_create_window_t); i++) d[i] = s[i];
-    
-    syscall3(SYS_IPC_SEND, comp_port, (long)&msg, 0); // Size 0 implies use internal size field?
-    // Actually syscall implementation:
-    // It copies the whole message struct.
+    syscall3(SYS_IPC_SEND, comp_port, (long)&msg, 0);
     
     return win;
 }
 
-gui_widget_t *gui_create_button(gui_window_t *win, int x, int y, int w, int h, const char *text, gui_callback_t cb) {
-    gui_widget_t *b = (gui_widget_t *)malloc(sizeof(gui_widget_t));
-    b->type = 1; // Button
-    b->x = x; b->y = y; b->width = w; b->height = h;
-    strncpy(b->text, text, 63);
-    b->on_event = cb;
-    b->is_hovered = 0;
-    b->parent = win;
+void gui_window_add_child(gui_window_t *win, gui_widget_t *child) {
+    if (!win || !child) return;
     
-    b->next = win->widgets;
-    win->widgets = b;
+    child->parent = (gui_widget_t *)win;
     
-    return b;
-}
-
-gui_widget_t *gui_create_label(gui_window_t *win, int x, int y, const char *text) {
-    gui_widget_t *l = (gui_widget_t *)malloc(sizeof(gui_widget_t));
-    l->type = 2; // Label
-    l->x = x; l->y = y;
-    strncpy(l->text, text, 63);
-    l->width = strlen(text) * 8;
-    l->height = 16;
-    l->on_event = NULL;
-    l->parent = win;
-    
-    l->next = win->widgets;
-    win->widgets = l;
-    
-    return l;
-}
-
-static void render_widgets(gui_window_t *win) {
-    // Clear
-    for (int i = 0; i < win->width * win->height; i++) win->buffer[i] = GUI_COLOR_WINDOW;
-    
-    gui_widget_t *w = win->widgets;
-    // We need to render in reverse order to draw first added last? Or list is stack?
-    // List is LIFO (prepend). So last added is first in list.
-    // Usually we want to draw back to front.
-    // Let's just draw in list order (Top-most first? No, Top-most last).
-    // Simple iteration for now.
-    
-    while (w) {
-        if (w->type == 1) { // Button
-            uint32_t bg = w->is_hovered ? GUI_COLOR_BUTTON_HOVER : GUI_COLOR_BUTTON;
-            gui_draw_rect(win, w->x, w->y, w->width, w->height, bg);
-            // Border
-            gui_draw_rect(win, w->x, w->y, w->width, 1, GUI_COLOR_BORDER);
-            gui_draw_rect(win, w->x, w->y + w->height - 1, w->width, 1, GUI_COLOR_BORDER);
-            gui_draw_rect(win, w->x, w->y, 1, w->height, GUI_COLOR_BORDER);
-            gui_draw_rect(win, w->x + w->width - 1, w->y, 1, w->height, GUI_COLOR_BORDER);
-            
-            // Text Centered
-            int tw = strlen(w->text) * 8;
-            int tx = w->x + (w->width - tw) / 2;
-            int ty = w->y + (w->height - 16) / 2;
-            gui_draw_text(win, tx, ty, w->text, GUI_COLOR_TEXT);
-        } else if (w->type == 2) { // Label
-            gui_draw_text(win, w->x, w->y, w->text, GUI_COLOR_TEXT);
-        }
-        w = w->next;
+    if (!win->base.first_child) {
+        win->base.first_child = child;
+    } else {
+        gui_widget_t *last = win->base.first_child;
+        while (last->next_sibling) last = last->next_sibling;
+        last->next_sibling = child;
     }
 }
 
-void gui_main_loop(gui_window_t *win) {
-    render_widgets(win);
+static void gui_draw_button(gui_window_t *win, gui_button_t *btn) {
+    uint32_t color = btn->is_hovered ? btn->hover_color : btn->color;
+    if (btn->is_pressed) color = blend(COLOR_BLACK, color); // Darken
     
-    // Initial Paint
-    ipc_message_t inv;
-    inv.size = 0;
-    syscall3(SYS_IPC_SEND, comp_port, (long)&inv, 0);
+    gui_draw_rect(win, btn->base.x, btn->base.y, btn->base.w, btn->base.h, color);
     
+    // Center Text (Roughly)
+    int text_len = strlen(btn->text);
+    int tx = btn->base.x + (btn->base.w - text_len * FONT_WIDTH) / 2;
+    int ty = btn->base.y + (btn->base.h - FONT_HEIGHT) / 2;
+    
+    gui_draw_text(win, tx, ty, btn->text, btn->text_color);
+}
+
+static void gui_draw_label(gui_window_t *win, gui_label_t *lbl) {
+    gui_draw_text(win, lbl->base.x, lbl->base.y, lbl->text, lbl->text_color);
+}
+
+static void gui_draw_widget(gui_window_t *win, gui_widget_t *w) {
+    if (!w) return;
+    
+    if (w->type == WIDGET_BUTTON) {
+        gui_draw_button(win, (gui_button_t*)w);
+    } else if (w->type == WIDGET_LABEL) {
+        gui_draw_label(win, (gui_label_t*)w);
+    }
+    
+    // Draw children
+    gui_widget_t *child = w->first_child;
+    while (child) {
+        gui_draw_widget(win, child);
+        child = child->next_sibling;
+    }
+}
+
+void gui_window_update(gui_window_t *win) {
+    // Redraw Background
+    gui_draw_rect(win, 0, 0, win->width, win->height, win->bg_color);
+    
+    // Draw Widgets
+    gui_widget_t *child = win->base.first_child;
+    while (child) {
+        gui_draw_widget(win, child);
+        child = child->next_sibling;
+    }
+    
+    // Notify Compositor (Damage)
+    // Simplified: Just say "updated"
     ipc_message_t msg;
-    while (!win->should_close) {
-        long res = syscall3(SYS_IPC_RECV, win->reply_port, (long)&msg, 0);
-        if (res == 0) {
-            if (msg.size == sizeof(msg_input_event_t)) {
-                msg_input_event_t *evt = (msg_input_event_t *)msg.data;
-                
-                int needs_redraw = 0;
-                
-                if (evt->type == 3) { // Mouse Move
-                     // Check Hovers
-                     gui_widget_t *w = win->widgets;
-                     while (w) {
-                         int hover = (evt->x >= w->x && evt->x < w->x + w->width &&
-                                      evt->y >= w->y && evt->y < w->y + w->height);
-                         if (hover != w->is_hovered) {
-                             w->is_hovered = hover;
-                             needs_redraw = 1;
-                         }
-                         w = w->next;
-                     }
-                }
-                else if (evt->type == 4) { // Mouse Down
-                    gui_widget_t *w = win->widgets;
-                    while (w) {
-                        if (evt->x >= w->x && evt->x < w->x + w->width &&
-                            evt->y >= w->y && evt->y < w->y + w->height) {
-                            
-                            if (w->on_event) w->on_event(w, GUI_EVENT_CLICK, evt->x, evt->y);
-                            needs_redraw = 1; // Assume click changes something
-                            break; // Handle one widget
-                        }
-                        w = w->next;
+    msg.msg_id = 102; // WINDOW_UPDATE
+    msg.reply_port = win->event_port;
+    msg.size = 0;
+    syscall3(SYS_IPC_SEND, comp_port, (long)&msg, 0);
+}
+
+// Event Dispatch
+static int is_point_in_rect(int px, int py, int x, int y, int w, int h) {
+    return (px >= x && px < x + w && py >= y && py < y + h);
+}
+
+static void gui_handle_mouse(gui_window_t *win, int type, int x, int y) {
+    // Traverse widgets to find target
+    gui_widget_t *w = win->base.first_child;
+    while (w) {
+        if (is_point_in_rect(x, y, w->x, w->y, w->w, w->h)) {
+            if (w->type == WIDGET_BUTTON) {
+                gui_button_t *btn = (gui_button_t*)w;
+                if (type == 2) { // Mouse Move
+                    if (!btn->is_hovered) {
+                        btn->is_hovered = 1;
+                        gui_window_update(win);
                     }
-                }
-                
-                if (needs_redraw) {
-                    render_widgets(win);
-                    inv.size = 0;
-                    syscall3(SYS_IPC_SEND, comp_port, (long)&inv, 0);
+                } else if (type == 1) { // Click
+                    btn->is_pressed = 1;
+                    gui_window_update(win);
+                    if (w->on_click) w->on_click(w, NULL);
+                    // Reset press after short delay or on release?
+                    // For now, simple immediate reset on next update logic or just leave it
+                    btn->is_pressed = 0; 
+                    gui_window_update(win);
                 }
             }
+        } else {
+             if (w->type == WIDGET_BUTTON) {
+                gui_button_t *btn = (gui_button_t*)w;
+                if (btn->is_hovered) {
+                    btn->is_hovered = 0;
+                    gui_window_update(win);
+                }
+             }
         }
+        w = w->next_sibling;
     }
+}
+
+int gui_window_process_events(gui_window_t *win) {
+    ipc_message_t msg;
+    // Non-blocking check? Or blocking?
+    // Let's do non-blocking if possible, or blocking if this is the main loop
+    // For now, blocking receive
+    long res = syscall3(SYS_IPC_RECV, win->event_port, (long)&msg, sizeof(msg));
+    if (res < 0) return 1; // Error or no message
+    
+    if (msg.msg_id == 200) { // INPUT_EVENT
+        msg_input_event_t *evt = (msg_input_event_t*)msg.data;
+        if (evt->type == 2) { // Mouse
+            // Adjust coords relative to window? 
+            // Compositor sends relative coords usually.
+            gui_handle_mouse(win, 2, evt->x, evt->y); // Move
+        } else if (evt->type == 1) { // Key
+             // Handle key
+        } else if (evt->type == 3) { // Mouse Click
+            gui_handle_mouse(win, 1, evt->x, evt->y);
+        }
+    } else if (msg.msg_id == 999) { // CLOSE
+        return 0;
+    }
+    
+    return 1;
+}
+
+// Factory Functions
+gui_button_t *gui_create_button(int x, int y, int w, int h, const char *text, event_handler_t on_click) {
+    gui_button_t *btn = malloc(sizeof(gui_button_t));
+    memset(btn, 0, sizeof(gui_button_t));
+    btn->base.type = WIDGET_BUTTON;
+    btn->base.x = x;
+    btn->base.y = y;
+    btn->base.w = w;
+    btn->base.h = h;
+    btn->base.on_click = on_click;
+    strncpy(btn->text, text, 31);
+    btn->color = COLOR_GRAY;
+    btn->hover_color = RGBA(150, 150, 150, 255);
+    btn->text_color = COLOR_BLACK;
+    return btn;
+}
+
+gui_label_t *gui_create_label(int x, int y, const char *text) {
+    gui_label_t *lbl = malloc(sizeof(gui_label_t));
+    memset(lbl, 0, sizeof(gui_label_t));
+    lbl->base.type = WIDGET_LABEL;
+    lbl->base.x = x;
+    lbl->base.y = y;
+    strncpy(lbl->text, text, 63);
+    lbl->text_color = COLOR_BLACK;
+    return lbl;
 }

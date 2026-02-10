@@ -29,6 +29,7 @@
 #include "devfs.h"
 #include "ahci.h"
 #include "drivers/e1000.h"
+#include "drivers/hda.h"
 #include "block.h"
 #include "partition.h"
 #include "bcache.h"
@@ -374,6 +375,9 @@ void _start(void) {
 
     // Initialize BGA Graphics (if available)
     bga_init();
+
+    // Initialize Audio (HDA)
+    hda_init();
 
     // Initialize block device layer and register AHCI
     block_init();

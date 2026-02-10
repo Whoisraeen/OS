@@ -71,4 +71,13 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
 #define SYS_AIO_WAIT     70
 #define SYS_SEC_GRANT    71
 
+// Socket Syscalls
+#define SYS_SOCKET       80
+#define SYS_BIND         81
+#define SYS_LISTEN       82
+#define SYS_ACCEPT       83
+#define SYS_CONNECT      84
+#define SYS_SEND         85
+#define SYS_RECV         86
+
 #endif
