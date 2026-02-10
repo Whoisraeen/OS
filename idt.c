@@ -25,6 +25,9 @@ extern void mouse_handler(void);
 // AHCI Handler
 extern void ahci_isr(void);
 
+// E1000 Handler
+extern void e1000_isr(void);
+
 // Debugging globals
 extern uint32_t *fb_ptr;
 extern uint64_t fb_width;

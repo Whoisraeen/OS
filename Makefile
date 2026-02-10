@@ -13,7 +13,7 @@ LD = ld
 # -m64: Targets x86_64.
 CFLAGS = -O2 -g -Wall -Wextra -Wpedantic \
          -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone \
-         -mcmodel=kernel \
+         -mcmodel=large \
          -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE \
          -fno-pic -I.
 
@@ -29,7 +29,7 @@ SRCS = kernel.c gdt.c idt.c pic.c keyboard.c pmm.c vmm.c heap.c serial.c \
        spinlock.c cpu.c lapic.c mutex.c semaphore.c fd.c pipe.c signal.c \
        futex.c vm_area.c acpi.c ioapic.c rtc.c driver.c pci.c dma.c \
        devfs.c ahci.c bga.c block.c partition.c bcache.c ext2.c klog.c ksyms.c \
-       aio.c drivers/e1000.c
+       aio.c drivers/e1000.c net/sys_arch.c
 
 OBJS = $(SRCS:.c=.o) interrupts.o
 
@@ -118,5 +118,4 @@ run: $(ISO_IMAGE) disk.img
 disk.img:
 	dd if=/dev/zero of=disk.img bs=1M count=64
 
-clean:
 	rm -rf $(OBJS) $(KERNEL_BIN) $(ISO_IMAGE) iso_root

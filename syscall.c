@@ -1,4 +1,5 @@
 #include "syscall.h"
+#include "aio.h"
 #include "idt.h"
 #include "console.h"
 #include "serial.h"

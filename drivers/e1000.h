@@ -104,11 +104,15 @@ typedef struct {
     uint16_t tx_cur;
     
     int irq;
+
+    // Receive Callback
+    void (*rx_callback)(const void *data, uint16_t len);
 } e1000_state_t;
 
 // API
 void e1000_init(void);
 int e1000_send_packet(const void *data, uint16_t len);
-// Receive is handled via interrupt/callback or polling for now
+void e1000_set_rx_callback(void (*callback)(const void *data, uint16_t len));
+uint8_t *e1000_get_mac(void);
 
 #endif

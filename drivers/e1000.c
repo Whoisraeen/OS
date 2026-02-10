@@ -1,6 +1,7 @@
 #include "e1000.h"
 #include "pci.h"
 #include "console.h"
+#include "serial.h"
 #include "vmm.h"
 #include "pmm.h"
 #include "string.h"
@@ -71,9 +72,28 @@ void e1000_isr(void) {
     
     uint32_t icr = e1000_read_reg(E1000_ICR);
     if (icr & E1000_ICR_RXT0) {
-        // kprintf("[E1000] Packet Received!\n");
-        // Update head/tail and handle packet
+        // Handle Received Packets
+        while ((e1000.rx_descs[e1000.rx_cur].status & 1)) {
+            uint16_t len = e1000.rx_descs[e1000.rx_cur].length;
+            uint8_t *buf = e1000.rx_buffers[e1000.rx_cur];
+            
+            if (e1000.rx_callback) {
+                e1000.rx_callback(buf, len);
+            }
+            
+            e1000.rx_descs[e1000.rx_cur].status = 0;
+            e1000_write_reg(E1000_RDT, e1000.rx_cur); // Advance tail
+            e1000.rx_cur = (e1000.rx_cur + 1) % E1000_NUM_RX_DESC;
+        }
     }
+}
+
+void e1000_set_rx_callback(void (*callback)(const void *data, uint16_t len)) {
+    e1000.rx_callback = callback;
+}
+
+uint8_t *e1000_get_mac(void) {
+    return e1000.mac;
 }
 
 void e1000_init(void) {
