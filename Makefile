@@ -15,7 +15,7 @@ CFLAGS = -O2 -g -Wall -Wextra -Wpedantic \
          -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone \
          -mcmodel=large \
          -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE \
-         -fno-pic -I.
+         -fno-pic -I. -Inet/include
 
 # Linker flags
 # We use a custom linker script or flags to set the base address.
@@ -29,7 +29,8 @@ SRCS = kernel.c gdt.c idt.c pic.c keyboard.c pmm.c vmm.c heap.c serial.c \
        spinlock.c cpu.c lapic.c mutex.c semaphore.c fd.c pipe.c signal.c \
        futex.c vm_area.c acpi.c ioapic.c rtc.c driver.c pci.c dma.c \
        devfs.c ahci.c bga.c block.c partition.c bcache.c ext2.c klog.c ksyms.c \
-       aio.c drivers/e1000.c drivers/hda.c net/sys_arch.c
+       aio.c drivers/e1000.c drivers/hda.c net/sys_arch.c net/core/pbuf.c \
+       net/core/netif.c net/core/ip.c net/core/tcp.c
 
 OBJS = $(SRCS:.c=.o) interrupts.o
 
@@ -82,7 +83,7 @@ initrd/audio_server.elf: userspace/audio_server.c userspace/linker.ld
 
 initrd/gemini.elf: userspace/gemini.c userspace/linker.ld
 	mkdir -p initrd
-	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/gemini.c -o initrd/gemini.elf
+	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/gemini.c userspace/lib/tls.c -o initrd/gemini.elf
 
 initrd/test_driver.o: drivers/test_driver.c
 	mkdir -p initrd

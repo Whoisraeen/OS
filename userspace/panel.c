@@ -62,8 +62,8 @@ void _start(void) {
     
     gui_window_add_child(win, (gui_widget_t*)gui_create_button(4, 4, 60, 24, "Start", on_start_click));
     
-    clock_label = gui_create_label(1024 - 80, 8, "00:00:00");
-    gui_window_add_child(win, (gui_widget_t*)clock_label);
+    clock_label = (gui_widget_t*)gui_create_label(1024 - 80, 8, "00:00:00");
+    gui_window_add_child(win, clock_label);
     
     gui_window_add_child(win, (gui_widget_t*)gui_create_button(1024 - 150, 4, 60, 24, "Power", on_shutdown_click));
     
@@ -73,12 +73,7 @@ void _start(void) {
         if (!gui_window_process_events(win)) break;
         
         // Update Clock (every 1s)
-        uint64_t now = syscall0(SYS_CLOCK_GETTIME); // returns ticks/time?
-        // Wait, SYS_CLOCK_GETTIME expects arg.
-        // Let's use gettimeofday wrapper if available or just raw syscall
-        
-        // TODO: Format time
-        // strncpy(clock_label->text, "12:00:00", 63);
-        // gui_window_update(win);
+        // uint64_t now = syscall0(SYS_CLOCK_GETTIME); // returns ticks/time?
+        update_clock();
     }
 }

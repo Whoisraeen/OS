@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include "syscalls.h"
 #include "u_stdlib.h"
+#include "lib/tls.h"
 
 static size_t strlen(const char *str) {
     size_t len = 0;
@@ -54,24 +55,30 @@ void _start(void) {
     if (ret < 0) {
         printf("Error: Connection failed (Networking stack not ready)\n");
     } else {
-        printf("Connected!\n");
+        printf("Connected! Initializing TLS...\n");
         
-        // 3. Send Request
-        // <URL><CR><LF>
-        char req[256];
-        int len = 0;
-        // strcpy(req, url); ...
-        req[0] = '\r'; req[1] = '\n'; req[2] = 0;
-        
-        syscall3(SYS_SEND, sockfd, (long)req, 2);
-        
-        // 4. Receive Response
-        char buf[1024];
-        int n = syscall3(SYS_RECV, sockfd, (long)buf, 1024);
-        if (n > 0) {
-            buf[n] = 0;
-            printf("%s\n", buf);
+        tls_ctx_t *tls = tls_create_context();
+        if (tls_connect(tls, sockfd, "raeenos.org") < 0) {
+             printf("TLS Handshake failed\n");
+        } else {
+            // 3. Send Request
+            // <URL><CR><LF>
+            char req[256];
+            int len = 0;
+            // strcpy(req, url); ...
+            req[0] = '\r'; req[1] = '\n'; req[2] = 0;
+            
+            tls_write(tls, req, 2);
+            
+            // 4. Receive Response
+            char buf[1024];
+            int n = tls_read(tls, buf, 1024);
+            if (n > 0) {
+                buf[n] = 0;
+                printf("%s\n", buf);
+            }
         }
+        tls_destroy_context(tls);
     }
     
     // Fallback Demo Output

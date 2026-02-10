@@ -12,7 +12,8 @@
 
 // Since we are running in kernel for now, we map lwIP primitives to kernel primitives
 
-#include "net/lwip_mock.h"
+#include "lwip/netif.h"
+#include "lwip/pbuf.h"
 #include "semaphore.h"
 #include "sched.h"
 #include "ipc.h"
@@ -176,32 +177,6 @@ sys_thread_t sys_thread_new(const char *name, void (*thread)(void *arg), void *a
     (void)arg; (void)stacksize; (void)prio;
     // Warning: arg is dropped!
     return task_create(name, (void(*)(void))thread);
-}
-
-// Mock PBUF allocation for now (since we don't have lwIP core)
-struct pbuf *pbuf_alloc(int layer, uint16_t length, int type) {
-    (void)layer; (void)type;
-    struct pbuf *p = kmalloc(sizeof(struct pbuf));
-    if (!p) return NULL;
-    
-    p->next = NULL;
-    p->payload = kmalloc(length);
-    p->len = length;
-    p->tot_len = length;
-    p->ref = 1;
-    
-    if (!p->payload) {
-        kfree(p);
-        return NULL;
-    }
-    return p;
-}
-
-void pbuf_free(struct pbuf *p) {
-    if (p) {
-        if (p->payload) kfree(p->payload);
-        kfree(p);
-    }
 }
 
 // ============================================================================

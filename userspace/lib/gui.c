@@ -84,8 +84,8 @@ void gui_draw_rect(gui_window_t *win, int x, int y, int w, int h, uint32_t color
     // Clip
     if (x < 0) { w += x; x = 0; }
     if (y < 0) { h += y; y = 0; }
-    if (x + w > win->width) w = win->width - x;
-    if (y + h > win->height) h = win->height - y;
+    if ((int)(x + w) > (int)win->width) w = win->width - x;
+    if ((int)(y + h) > (int)win->height) h = win->height - y;
     
     if (w <= 0 || h <= 0) return;
     
@@ -108,7 +108,7 @@ extern const uint8_t font_bitmap[];
 #define FONT_HEIGHT 16
 
 void gui_draw_char(gui_window_t *win, int x, int y, char c, uint32_t color) {
-    if (c < 32 || c > 127) c = '?';
+    if (c < 32 || c > 126) c = '?';
     const uint8_t *glyph = &font_bitmap[(c - 32) * 16];
     
     for (int row = 0; row < 16; row++) {
@@ -163,7 +163,7 @@ gui_window_t *gui_create_window(const char *title, int width, int height) {
     win->buffer = (uint32_t *)syscall2(SYS_IPC_SHMEM_MAP, shmem_id, 0);
     
     // Clear Buffer
-    for (size_t i = 0; i < width * height; i++) win->buffer[i] = win->bg_color;
+    for (size_t i = 0; i < (size_t)(width * height); i++) win->buffer[i] = win->bg_color;
     
     // Create Reply Port
     int reply_port = syscall1(SYS_IPC_CREATE, 0);
