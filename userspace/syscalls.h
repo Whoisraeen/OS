@@ -40,6 +40,10 @@
 #define SYS_THREAD_JOIN  52
 #define SYS_FUTEX        53
 #define SYS_SET_TLS      54
+#define SYS_CLOCK_GETTIME 55
+#define SYS_REBOOT       56
+#define SYS_SHUTDOWN     57
+#define SYS_IOCTL        58
 
 // IPC Constants
 #define IPC_PORT_FLAG_RECEIVE (1 << 1)

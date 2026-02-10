@@ -1,5 +1,6 @@
 #include "idt.h"
 #include "pic.h"
+#include "lapic.h"
 #include "serial.h"
 #include "sched.h"
 #include "timer.h"
@@ -53,7 +54,10 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
     // ---- Timer IRQ (Vector 32) — Preemptive scheduling ----
     if (frame->int_no == 32) {
         timer_tick();
-        pic_send_eoi(0); // EOI before context switch
+        if (lapic_is_ioapic_mode())
+            lapic_eoi();
+        else
+            pic_send_eoi(0);
 
         // Call scheduler — may return a different task's RSP
         uint64_t new_rsp = scheduler_switch((registers_t *)frame);
@@ -156,9 +160,17 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
         mouse_handler();
     }
 
+    // ---- Spurious vector (0xFF = 255) — no EOI needed ----
+    if (frame->int_no == 0xFF) {
+        return (uint64_t)frame;
+    }
+
     // ---- Send EOI for IRQs (vectors 33-47, timer already handled above) ----
     if (frame->int_no >= 33 && frame->int_no <= 47) {
-        pic_send_eoi(frame->int_no - 32);
+        if (lapic_is_ioapic_mode())
+            lapic_eoi();
+        else
+            pic_send_eoi(frame->int_no - 32);
     }
 
     return (uint64_t)frame; // No context switch for regular interrupts

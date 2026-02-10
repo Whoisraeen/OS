@@ -23,7 +23,7 @@ CFLAGS = -O2 -g -Wall -Wextra -Wpedantic \
 LDFLAGS = -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -T linker.ld
 
 # Source files
-SRCS = kernel.c gdt.c idt.c pic.c keyboard.c pmm.c vmm.c heap.c serial.c console.c vfs.c initrd.c syscall.c user.c shell.c timer.c sched.c mouse.c desktop.c speaker.c compositor.c elf.c ipc.c security.c spinlock.c cpu.c lapic.c mutex.c semaphore.c fd.c pipe.c signal.c futex.c vm_area.c
+SRCS = kernel.c gdt.c idt.c pic.c keyboard.c pmm.c vmm.c heap.c serial.c console.c vfs.c initrd.c syscall.c user.c shell.c timer.c sched.c mouse.c desktop.c speaker.c compositor.c elf.c ipc.c security.c spinlock.c cpu.c lapic.c mutex.c semaphore.c fd.c pipe.c signal.c futex.c vm_area.c acpi.c ioapic.c rtc.c driver.c pci.c dma.c devfs.c
 OBJS = $(SRCS:.c=.o) interrupts.o
 
 .PHONY: all clean run iso

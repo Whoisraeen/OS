@@ -18,6 +18,9 @@
 #include "signal.h"
 #include "futex.h"
 #include "vm_area.h"
+#include "rtc.h"
+#include "acpi.h"
+#include "driver.h"
 
 // MSR registers
 #define MSR_EFER     0xC0000080
@@ -623,6 +626,47 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             security_context_t *ctx = security_get_context(current_pid);
             if (ctx) return ctx->capabilities;
             return 0;
+        }
+
+        // === Time & Power Syscalls ===
+        case SYS_CLOCK_GETTIME: {
+            // arg1 = pointer to uint64_t[2] (user space) — [0]=seconds, [1]=nanoseconds
+            if (!is_user_address(arg1, 2 * sizeof(uint64_t))) return (uint64_t)-1;
+
+            rtc_time_t t;
+            rtc_get_time(&t);
+
+            uint64_t *user_ts = (uint64_t *)arg1;
+            user_ts[0] = rtc_get_timestamp(); // Seconds since epoch (2000-01-01)
+            user_ts[1] = 0; // No sub-second precision from RTC
+            return 0;
+        }
+
+        case SYS_REBOOT: {
+            kprintf("[SYSCALL] Reboot requested by PID %u\n", current_pid);
+            acpi_reboot();
+            return 0; // Never reached
+        }
+
+        case SYS_SHUTDOWN: {
+            kprintf("[SYSCALL] Shutdown requested by PID %u\n", current_pid);
+            acpi_shutdown();
+            return 0; // Never reached
+        }
+
+        case SYS_IOCTL: {
+            // arg1 = fd, arg2 = cmd, arg3 = arg pointer
+            task_t *task = task_get_by_id(current_pid);
+            if (!task || !task->fd_table) return (uint64_t)-1;
+
+            fd_entry_t *entry = fd_get(task->fd_table, (int)arg1);
+            if (!entry) return (uint64_t)-1;
+
+            // For now, ioctl only works on device fds backed by a driver
+            // A future extension could support ioctl on files, pipes, etc.
+            (void)arg2;
+            (void)arg3;
+            return (uint64_t)-1; // Not yet implemented for specific devices
         }
 
         default:

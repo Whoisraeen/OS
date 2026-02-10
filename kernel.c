@@ -20,6 +20,13 @@
 #include "timer.h"
 #include "syscall.h"
 #include "mouse.h"
+#include "acpi.h"
+#include "ioapic.h"
+#include "rtc.h"
+#include "lapic.h"
+#include "driver.h"
+#include "pci.h"
+#include "devfs.h"
 
 // Globals for drivers to access
 uint32_t *fb_ptr = NULL;
@@ -151,10 +158,19 @@ void _start(void) {
     // Initialize Heap (needs PMM + VMM)
     heap_init();
 
+    // Parse ACPI tables (needed before IOAPIC and RTC)
+    acpi_init();
+
     // Initialize SMP (Detect and wake up other cores)
     smp_init();
 
-    // Initialize Timer (PIT for scheduling)
+    // Initialize IOAPIC (replaces PIC for IRQ routing)
+    ioapic_init();
+    if (acpi_get_info()->has_ioapic) {
+        lapic_set_ioapic_mode(1);
+    }
+
+    // Initialize Timer (PIT for scheduling — used for LAPIC calibration too)
     timer_init();
 
     // Initialize Scheduler
@@ -162,6 +178,24 @@ void _start(void) {
 
     // Enable Interrupts AFTER scheduler is ready to handle ticks
     __asm__ volatile ("sti");
+
+    // Calibrate and start LAPIC timer (replaces PIT for scheduling)
+    if (acpi_get_info()->has_ioapic) {
+        lapic_timer_calibrate();
+        lapic_timer_start();
+    }
+
+    // Initialize RTC (for date/time)
+    rtc_init();
+
+    // Initialize driver subsystem
+    driver_init();
+
+    // Initialize PCI bus enumeration
+    pci_init();
+
+    // Initialize /dev filesystem
+    devfs_init();
 
     // Initialize IPC subsystem
     ipc_init();
