@@ -23,7 +23,7 @@ CFLAGS = -O2 -g -Wall -Wextra -Wpedantic \
 LDFLAGS = -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -T linker.ld
 
 # Source files
-SRCS = kernel.c gdt.c idt.c pic.c keyboard.c pmm.c vmm.c heap.c serial.c console.c vfs.c initrd.c syscall.c user.c shell.c timer.c sched.c mouse.c desktop.c speaker.c compositor.c elf.c ipc.c security.c spinlock.c cpu.c lapic.c mutex.c semaphore.c fd.c pipe.c signal.c futex.c vm_area.c acpi.c ioapic.c rtc.c driver.c pci.c dma.c devfs.c
+SRCS = kernel.c gdt.c idt.c pic.c keyboard.c pmm.c vmm.c heap.c serial.c console.c vfs.c initrd.c syscall.c user.c shell.c timer.c sched.c mouse.c desktop.c speaker.c compositor.c elf.c ipc.c security.c spinlock.c cpu.c lapic.c mutex.c semaphore.c fd.c pipe.c signal.c futex.c vm_area.c acpi.c ioapic.c rtc.c driver.c pci.c dma.c devfs.c ahci.c
 OBJS = $(SRCS:.c=.o) interrupts.o
 
 .PHONY: all clean run iso
@@ -74,8 +74,14 @@ $(ISO_IMAGE): $(KERNEL_BIN) limine initrd.tar
 	# Install Limine to the ISO (BIOS boot support)
 	./limine/limine bios-install $(ISO_IMAGE)
 
-run: $(ISO_IMAGE)
-	qemu-system-x86_64 -cdrom $(ISO_IMAGE) -M q35 -serial stdio
+run: $(ISO_IMAGE) disk.img
+	qemu-system-x86_64 -cdrom $(ISO_IMAGE) -M q35 -serial stdio \
+	-drive id=disk,file=disk.img,if=none,format=raw \
+	-device ahci,id=ahci \
+	-device ide-hd,drive=disk,bus=ahci.0
+
+disk.img:
+	dd if=/dev/zero of=disk.img bs=1M count=64
 
 clean:
 	rm -rf $(OBJS) $(KERNEL_BIN) $(ISO_IMAGE) iso_root

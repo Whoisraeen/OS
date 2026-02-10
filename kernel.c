@@ -27,6 +27,7 @@
 #include "driver.h"
 #include "pci.h"
 #include "devfs.h"
+#include "ahci.h"
 
 // Globals for drivers to access
 uint32_t *fb_ptr = NULL;
@@ -193,6 +194,38 @@ void _start(void) {
 
     // Initialize PCI bus enumeration
     pci_init();
+
+    // Initialize AHCI Storage
+    ahci_init();
+
+    // Test Disk I/O
+    console_printf("[KERNEL] Allocating buffer for disk test...\n");
+    uint8_t *disk_buf = (uint8_t*)kmalloc(4096);
+    if (disk_buf) {
+        // Write test
+        const char *msg = "RAEENOS DISK TEST SECTOR 0";
+        for (int i=0; i<4096; i++) disk_buf[i] = 0;
+        for (int i=0; msg[i]; i++) disk_buf[i] = msg[i];
+        
+        console_printf("[KERNEL] Writing to disk LBA 0...\n");
+        if (ahci_write(0, 1, disk_buf) == 0) {
+             console_printf("[KERNEL] Write success!\n");
+        } else {
+             console_printf("[KERNEL] Write failed (is disk attached?)\n");
+        }
+
+        // Read test
+        for (int i=0; i<4096; i++) disk_buf[i] = 0;
+        console_printf("[KERNEL] Reading from disk LBA 0...\n");
+        if (ahci_read(0, 1, disk_buf) == 0) {
+            console_printf("[KERNEL] Read success: '%s'\n", (char*)disk_buf);
+        } else {
+            console_printf("[KERNEL] Read failed.\n");
+        }
+        kfree(disk_buf);
+    } else {
+        console_printf("[KERNEL] Failed to allocate disk buffer!\n");
+    }
 
     // Initialize /dev filesystem
     devfs_init();
