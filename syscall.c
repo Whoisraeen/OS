@@ -654,15 +654,17 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
 
         // === Time & Power Syscalls ===
         case SYS_CLOCK_GETTIME: {
-            // arg1 = pointer to uint64_t[2] (user space) — [0]=seconds, [1]=nanoseconds
-            if (!is_user_address(arg1, 2 * sizeof(uint64_t))) return (uint64_t)-1;
-
-            rtc_time_t t;
-            rtc_get_time(&t);
-
+            // arg1 = struct timespec *ts
+            if (!is_user_address(arg1, 16)) return (uint64_t)-1;
+            
+            extern uint64_t timer_get_ticks(void);
+            uint64_t ticks = timer_get_ticks();
+            uint64_t ms = ticks * 10;
+            
             uint64_t *user_ts = (uint64_t *)arg1;
-            user_ts[0] = rtc_get_timestamp(); // Seconds since epoch (2000-01-01)
-            user_ts[1] = 0; // No sub-second precision from RTC
+            user_ts[0] = ms / 1000;
+            user_ts[1] = (ms % 1000) * 1000000;
+            
             return 0;
         }
 
@@ -809,9 +811,19 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             if (!security_has_capability(current_pid, CAP_HW_INPUT)) {
                 return (uint64_t)-1;
             }
-            // For now, simple busy wait or just return (mocking).
-            // Real implementation needs a per-process IRQ wait queue.
-            // TODO: Implement IRQ wait queues in scheduler
+            
+            int irq = (int)arg1;
+            if (irq < 0 || irq > 255) return (uint64_t)-1;
+            
+            task_t *task = task_get_by_id(current_pid);
+            if (!task) return (uint64_t)-1;
+            
+            // Register waiter
+            irq_register_waiter(irq, task);
+            
+            // Block and yield
+            task_block();
+            
             return 0; 
         }
 

@@ -361,6 +361,20 @@ void _start(void) {
                         inv.size = 0; // Empty message = Invalidate
                         syscall3(SYS_IPC_SEND, comp_port, (long)&inv, 0);
                     }
+                } else if (evt->type == 4) { // EVENT_MOUSE_DOWN
+                    // Click to move cursor
+                    int col = evt->x / FONT_WIDTH;
+                    int row = evt->y / FONT_HEIGHT;
+                    
+                    if (col >= 0 && col < COLS && row >= 0 && row < ROWS) {
+                        cursor_col = col;
+                        cursor_row = row;
+                        render_console();
+                        
+                        ipc_message_t inv;
+                        inv.size = 0;
+                        syscall3(SYS_IPC_SEND, comp_port, (long)&inv, 0);
+                    }
                 }
             }
         }

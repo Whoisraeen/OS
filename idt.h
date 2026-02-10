@@ -41,4 +41,8 @@ void idt_init(void);
 // For timer/yield, may return a different task's saved RSP
 uint64_t isr_handler(struct interrupt_frame *frame);
 
+struct task_t; // Forward declaration
+void irq_register_waiter(int irq, struct task_t *task);
+void irq_notify_waiter(int irq);
+
 #endif

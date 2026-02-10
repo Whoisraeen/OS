@@ -76,6 +76,8 @@ void _start(void) {
     long comp_port = 0;
 
     while (1) {
+        syscall1(SYS_IRQ_WAIT, 12);
+        
         // Find compositor if not found yet
         if (comp_port <= 0) {
             comp_port = syscall1(SYS_IPC_LOOKUP, (long)"compositor");
@@ -84,7 +86,7 @@ void _start(void) {
         // Poll status
         uint8_t status = syscall3(SYS_IOPORT, MOUSE_STATUS_PORT, 0, 0);
         
-        if ((status & STATUS_OUTPUT_FULL) && (status & STATUS_MOUSE_DATA)) {
+        while ((status & STATUS_OUTPUT_FULL) && (status & STATUS_MOUSE_DATA)) {
             uint8_t data = syscall3(SYS_IOPORT, MOUSE_DATA_PORT, 0, 0);
             
             switch (mouse_cycle) {
@@ -108,18 +110,10 @@ void _start(void) {
                     if (state & 0x10) dx |= 0xFFFFFF00;
                     if (state & 0x20) dy |= 0xFFFFFF00;
                     
-                    // Update relative position (Compositor handles absolute)
-                    // Wait, compositor expects absolute?
-                    // Let's look at compositor.c ... it tracks its own mouse_x/y
-                    // but it expects `evt.x` and `evt.y` from the driver.
-                    // The keyboard driver sends 0,0.
-                    // The compositor updates `mouse_x` from `evt.x`.
-                    // So we MUST send absolute coordinates.
-                    
                     mouse_x += dx;
                     mouse_y -= dy; // Invert Y
                     
-                    // Clamp (Arbitrary bounds, compositor will clamp to screen)
+                    // Clamp
                     if (mouse_x < 0) mouse_x = 0;
                     if (mouse_x > 1024) mouse_x = 1024;
                     if (mouse_y < 0) mouse_y = 0;
@@ -135,40 +129,15 @@ void _start(void) {
                             int32_t x;
                             int32_t y;
                         } msg;
-                        msg.type = 2; // EVENT_MOUSE_MOVE (custom? Gui.h has 3 for move, 2 is KeyUp?)
-                        // gui.h:
-                        // EVENT_KEY_DOWN 1
-                        // EVENT_KEY_UP 2  <-- Wait, let's check gui.h again
-                        // EVENT_MOUSE_MOVE 3
-                        // EVENT_MOUSE_DOWN 4
-                        // EVENT_MOUSE_UP 5
-                        
-                        // Let's send MOVE first
                         msg.type = 3; // EVENT_MOUSE_MOVE
                         msg.code = buttons;
                         msg.x = mouse_x;
                         msg.y = mouse_y;
                         syscall3(SYS_IPC_SEND, comp_port, (long)&msg, sizeof(msg));
-                        
-                        // Handle Clicks
-                        // For simplicity, just sending the state in 'code' allows compositor to decide
-                        // But standard way is separate events.
-                        // Our compositor `evt.type == 2` check in kernel fallback was "Mouse".
-                        // But IPC handler uses `msg_input_event_t`.
-                        // The compositor code I read:
-                        // if (evt.type == 2) { // Mouse (Legacy)
-                        // But for IPC:
-                        // evt.type = ievt->type;
-                        // ...
-                        // wait, the compositor loop for IPC doesn't have a `if (evt.type == 2)` block inside the IPC handler!
-                        // It only has `if (evt.type == 1) { // Keyboard }`
-                        
-                        // I NEED TO FIX THE COMPOSITOR TO HANDLE MOUSE IPC EVENTS!
                     }
                     break;
             }
+            status = syscall3(SYS_IOPORT, MOUSE_STATUS_PORT, 0, 0);
         }
-        
-        syscall3(SYS_YIELD, 0, 0, 0);
     }
 }

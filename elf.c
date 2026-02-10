@@ -3,6 +3,8 @@
 #include "serial.h"
 #include "vmm.h"
 #include "pmm.h"
+#include "ksyms.h"
+#include "string.h"
 
 // Memory copy
 static void mem_copy(void *dest, const void *src, size_t n) {
@@ -43,9 +45,9 @@ int elf_validate(const void *data, size_t size) {
         return 0;
     }
     
-    // Check executable or shared object
-    if (hdr->e_type != ET_EXEC && hdr->e_type != ET_DYN) {
-        kprintf("[ELF] Not executable (type=%d)\n", hdr->e_type);
+    // Check executable or shared object or relocatable
+    if (hdr->e_type != ET_EXEC && hdr->e_type != ET_DYN && hdr->e_type != ET_REL) {
+        kprintf("[ELF] Not executable/relocatable (type=%d)\n", hdr->e_type);
         return 0;
     }
     
@@ -55,8 +57,6 @@ int elf_validate(const void *data, size_t size) {
         return 0;
     }
     
-    kprintf("[ELF] Valid ELF64 executable, entry=0x%lx, %d phdrs\n", 
-            hdr->e_entry, hdr->e_phnum);
     return 1;
 }
 
@@ -109,6 +109,169 @@ elf_load_result_t elf_load(const void *data, size_t size) {
     result.success = 1;
     
     return result;
+}
+
+// Helper to get section name
+static const char *elf_get_section_name(const elf64_header_t *hdr, const uint8_t *data, int shndx) {
+    if (hdr->e_shstrndx == 0 || hdr->e_shstrndx >= hdr->e_shnum) return NULL;
+    
+    const elf64_shdr_t *shstr = (const elf64_shdr_t *)(data + hdr->e_shoff + hdr->e_shstrndx * hdr->e_shentsize);
+    const char *strtab = (const char *)(data + shstr->sh_offset);
+    
+    const elf64_shdr_t *sh = (const elf64_shdr_t *)(data + hdr->e_shoff + shndx * hdr->e_shentsize);
+    return strtab + sh->sh_name;
+}
+
+// Load relocatable kernel module
+int elf_load_module(const void *data, size_t size, void **entry_point) {
+    if (!elf_validate(data, size)) return -1;
+    
+    const elf64_header_t *hdr = (const elf64_header_t *)data;
+    const uint8_t *file_data = (const uint8_t *)data;
+    
+    if (hdr->e_type != ET_REL) {
+        kprintf("[ELF] Module must be ET_REL\n");
+        return -1;
+    }
+    
+    // Allocate memory for sections
+    // We need to keep track of where each section is loaded to resolve symbols
+    uint64_t *section_addrs = (uint64_t *)kmalloc(hdr->e_shnum * sizeof(uint64_t));
+    if (!section_addrs) return -1;
+    mem_set(section_addrs, 0, hdr->e_shnum * sizeof(uint64_t));
+    
+    // 1. Load Allocatable Sections
+    for (int i = 0; i < hdr->e_shnum; i++) {
+        const elf64_shdr_t *sh = (const elf64_shdr_t *)(file_data + hdr->e_shoff + i * hdr->e_shentsize);
+        
+        if (sh->sh_flags & SHF_ALLOC) {
+            // Allocate memory for this section
+            // TODO: Alignment
+            void *mem = kmalloc(sh->sh_size);
+            if (!mem) {
+                kprintf("[ELF] Failed to alloc section %d\n", i);
+                kfree(section_addrs);
+                return -1;
+            }
+            
+            mem_set(mem, 0, sh->sh_size);
+            if (sh->sh_type == SHT_PROGBITS) {
+                mem_copy(mem, file_data + sh->sh_offset, sh->sh_size);
+            }
+            
+            section_addrs[i] = (uint64_t)mem;
+            // kprintf("[ELF] Section %d loaded at %p\n", i, mem);
+        }
+    }
+    
+    // 2. Perform Relocations
+    for (int i = 0; i < hdr->e_shnum; i++) {
+        const elf64_shdr_t *sh = (const elf64_shdr_t *)(file_data + hdr->e_shoff + i * hdr->e_shentsize);
+        
+        if (sh->sh_type == SHT_RELA) {
+            // This section contains relocations for another section
+            uint32_t target_section_idx = sh->sh_info;
+            uint32_t symtab_idx = sh->sh_link;
+            
+            if (target_section_idx >= hdr->e_shnum || section_addrs[target_section_idx] == 0) {
+                continue; // Skip if target not loaded
+            }
+            
+            uint64_t target_base = section_addrs[target_section_idx];
+            
+            const elf64_shdr_t *symtab_sh = (const elf64_shdr_t *)(file_data + hdr->e_shoff + symtab_idx * hdr->e_shentsize);
+            const elf64_sym_t *symtab = (const elf64_sym_t *)(file_data + symtab_sh->sh_offset);
+            
+            // Get string table for symbols
+            const elf64_shdr_t *strtab_sh = (const elf64_shdr_t *)(file_data + hdr->e_shoff + symtab_sh->sh_link * hdr->e_shentsize);
+            const char *strtab = (const char *)(file_data + strtab_sh->sh_offset);
+            
+            int num_relocs = sh->sh_size / sh->sh_entsize;
+            const elf64_rela_t *relocs = (const elf64_rela_t *)(file_data + sh->sh_offset);
+            
+            for (int r = 0; r < num_relocs; r++) {
+                const elf64_rela_t *rel = &relocs[r];
+                
+                uint32_t sym_idx = ELF64_R_SYM(rel->r_info);
+                uint32_t type = ELF64_R_TYPE(rel->r_info);
+                
+                const elf64_sym_t *sym = &symtab[sym_idx];
+                
+                uint64_t sym_val = 0;
+                
+                if (sym->st_shndx == 0) {
+                    // Undefined symbol - resolve from kernel
+                    const char *name = strtab + sym->st_name;
+                    void *addr = ksyms_lookup(name);
+                    if (!addr) {
+                        kprintf("[ELF] Undefined symbol: %s\n", name);
+                        return -2;
+                    }
+                    sym_val = (uint64_t)addr;
+                } else {
+                    // Defined symbol - resolve internal address
+                    if (sym->st_shndx < hdr->e_shnum) {
+                        sym_val = section_addrs[sym->st_shndx] + sym->st_value;
+                    }
+                }
+                
+                uint64_t P = target_base + rel->r_offset; // Place being relocated
+                uint64_t S = sym_val;                     // Symbol value
+                int64_t  A = rel->r_addend;               // Addend
+                
+                switch (type) {
+                    case R_X86_64_64:
+                        *(uint64_t *)P = S + A;
+                        break;
+                    case R_X86_64_32:
+                        *(uint32_t *)P = (uint32_t)(S + A);
+                        break;
+                    case R_X86_64_32S:
+                        *(int32_t *)P = (int32_t)(S + A);
+                        break;
+                    case R_X86_64_PC32:
+                        *(uint32_t *)P = (uint32_t)(S + A - P);
+                        break;
+                    default:
+                        kprintf("[ELF] Unsupported relocation type %d\n", type);
+                        break;
+                }
+            }
+        }
+    }
+    
+    // 3. Find Entry Point (e.g., "module_init")
+    // Note: relocatable files don't use e_entry
+    // We look for a symbol named "module_init" or "driver_entry"
+    if (entry_point) {
+        *entry_point = NULL;
+        
+        // Iterate over all symbol tables
+        for (int i = 0; i < hdr->e_shnum; i++) {
+            const elf64_shdr_t *sh = (const elf64_shdr_t *)(file_data + hdr->e_shoff + i * hdr->e_shentsize);
+            if (sh->sh_type == SHT_SYMTAB) {
+                const elf64_sym_t *symtab = (const elf64_sym_t *)(file_data + sh->sh_offset);
+                int num_syms = sh->sh_size / sh->sh_entsize;
+                
+                const elf64_shdr_t *strtab_sh = (const elf64_shdr_t *)(file_data + hdr->e_shoff + sh->sh_link * hdr->e_shentsize);
+                const char *strtab = (const char *)(file_data + strtab_sh->sh_offset);
+                
+                for (int s = 0; s < num_syms; s++) {
+                    const char *name = strtab + symtab[s].st_name;
+                    if (strcmp(name, "driver_entry") == 0) {
+                        if (symtab[s].st_shndx < hdr->e_shnum) {
+                             *entry_point = (void *)(section_addrs[symtab[s].st_shndx] + symtab[s].st_value);
+                             break;
+                        }
+                    }
+                }
+            }
+            if (*entry_point) break;
+        }
+    }
+    
+    kfree(section_addrs);
+    return 0;
 }
 
 uint64_t elf_load_user(const void *data, size_t size) {

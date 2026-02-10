@@ -35,11 +35,72 @@
 #include "bga.h"
 #include "string.h"
 #include "klog.h"
+#include "ksyms.h"
+#include "elf.h"
 
 // Globals for drivers to access
 uint32_t *fb_ptr = NULL;
 uint64_t fb_width = 0;
 uint64_t fb_height = 0;
+
+// Helper to scan and load drivers from /disk/drivers
+static void load_drivers_from_disk(void) {
+    if (!vfs_root) return;
+    
+    // Check if /drivers exists
+    vfs_node_t *drivers_dir = vfs_finddir(vfs_root, "drivers");
+    if (!drivers_dir) {
+        // Try creating it if we are on disk
+        if (vfs_root == ext2_get_root(ext2_root_fs)) {
+            ext2_create(ext2_root_fs, EXT2_ROOT_INO, "drivers", EXT2_S_IFDIR | 0755);
+            drivers_dir = vfs_finddir(vfs_root, "drivers");
+        }
+    }
+    
+    if (!drivers_dir) return;
+    
+    kprintf("[KERNEL] Scanning /drivers for modules...\n");
+    
+    for (int i = 0; ; i++) {
+        vfs_node_t *node = vfs_readdir(drivers_dir, i);
+        if (!node) break;
+        
+        if (strcmp(node->name, ".") == 0 || strcmp(node->name, "..") == 0) continue;
+        
+        // Check for .o or .ko extension
+        int len = strlen(node->name);
+        if (len > 2 && strcmp(node->name + len - 2, ".o") == 0) {
+            kprintf("  - Loading module: %s... ", node->name);
+            
+            void *file_data = kmalloc(node->length);
+            if (file_data) {
+                if (vfs_read(node, 0, node->length, file_data) == node->length) {
+                    void *entry_point = NULL;
+                    int res = elf_load_module(file_data, node->length, &entry_point);
+                    if (res == 0) {
+                        if (entry_point) {
+                            kprintf("OK (Entry at %p)\n", entry_point);
+                            // Call entry point
+                            void (*driver_init_func)(void) = (void (*)(void))entry_point;
+                            driver_init_func();
+                        } else {
+                            kprintf("OK (No entry point)\n");
+                        }
+                    } else {
+                        kprintf("FAILED (Error %d)\n", res);
+                    }
+                } else {
+                    kprintf("FAILED (Read Error)\n");
+                }
+                // Note: we don't free file_data if loaded successfully because sections point to it?
+                // Actually elf_load_module allocates new memory for sections, so we can free the file buffer.
+                kfree(file_data); 
+            } else {
+                kprintf("FAILED (OOM)\n");
+            }
+        }
+    }
+}
 
 // =====================================================================
 // Test tasks for verifying preemptive multitasking
@@ -200,6 +261,34 @@ void _start(void) {
     // Initialize driver subsystem
     driver_init();
 
+    // Initialize Kernel Symbol Table
+    ksyms_init();
+    ksyms_register("kprintf", (void*)kprintf);
+    ksyms_register("kmalloc", (void*)kmalloc);
+    ksyms_register("kfree", (void*)kfree);
+    ksyms_register("vfs_finddir", (void*)vfs_finddir);
+    ksyms_register("vfs_read", (void*)vfs_read);
+    ksyms_register("driver_register", (void*)driver_register);
+    ksyms_register("driver_find", (void*)driver_find);
+    ksyms_register("driver_register_irq", (void*)driver_register_irq);
+    ksyms_register("pci_find_device", (void*)pci_find_device);
+    ksyms_register("pci_config_read8", (void*)pci_config_read8);
+    ksyms_register("pci_config_read16", (void*)pci_config_read16);
+    ksyms_register("pci_config_read32", (void*)pci_config_read32);
+    ksyms_register("pci_config_write16", (void*)pci_config_write16);
+    ksyms_register("pci_config_write32", (void*)pci_config_write32);
+    ksyms_register("port_inb", (void*)port_inb);
+    ksyms_register("port_outb", (void*)port_outb);
+    ksyms_register("port_inl", (void*)port_inl);
+    ksyms_register("port_outl", (void*)port_outl);
+    ksyms_register("fb_ptr", (void*)&fb_ptr); 
+    ksyms_register("fb_width", (void*)&fb_width);
+    ksyms_register("fb_height", (void*)&fb_height);
+    ksyms_register("memcpy", (void*)memcpy);
+    ksyms_register("memset", (void*)memset);
+    ksyms_register("strcmp", (void*)strcmp);
+    ksyms_register("strlen", (void*)strlen);
+    
     // Initialize PCI bus enumeration
     pci_init();
 
@@ -304,6 +393,7 @@ void _start(void) {
                     ext2_create(ext2_root_fs, EXT2_ROOT_INO, "dev", EXT2_S_IFDIR | 0755);
                     ext2_create(ext2_root_fs, EXT2_ROOT_INO, "tmp", EXT2_S_IFDIR | 0755);
                     ext2_create(ext2_root_fs, EXT2_ROOT_INO, "mnt", EXT2_S_IFDIR | 0755);
+                    ext2_create(ext2_root_fs, EXT2_ROOT_INO, "drivers", EXT2_S_IFDIR | 0755);
                     
                     for (size_t i = 0; ; i++) {
                         vfs_node_t *node = vfs_readdir(vfs_root, i);
@@ -316,13 +406,21 @@ void _start(void) {
                         
                         console_printf("   - Installing %s... ", node->name);
                         
+                        uint32_t parent_ino = EXT2_ROOT_INO;
+                        // Put .o files in /drivers
+                        int len = strlen(node->name);
+                        if (len > 2 && strcmp(node->name + len - 2, ".o") == 0) {
+                            uint32_t drv_ino = ext2_dir_lookup(ext2_root_fs, EXT2_ROOT_INO, "drivers");
+                            if (drv_ino) parent_ino = drv_ino;
+                        }
+                        
                         // Read file from Initrd
                         uint8_t *buf = kmalloc(node->length);
                         if (buf) {
                             vfs_read(node, 0, node->length, buf);
                             
                             // Create on disk
-                            uint32_t ino = ext2_create(ext2_root_fs, EXT2_ROOT_INO, node->name, EXT2_S_IFREG | 0755);
+                            uint32_t ino = ext2_create(ext2_root_fs, parent_ino, node->name, EXT2_S_IFREG | 0755);
                             if (ino) {
                                 ext2_inode_t inode;
                                 ext2_read_inode(ext2_root_fs, ino, &inode);
@@ -360,6 +458,9 @@ void _start(void) {
                 } else {
                     console_printf(" VFS: Failed to mount devfs at /dev\n");
                 }
+                
+                // Load Native Drivers
+                load_drivers_from_disk();
                 
             } else {
                  console_printf(" VFS: Failed to mount /disk\n");

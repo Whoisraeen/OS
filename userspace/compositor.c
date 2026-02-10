@@ -79,6 +79,18 @@ static uint32_t *back_buffer;
 #define SHADOW_OFFSET 6
 #define SHADOW_SIZE   8
 
+#define RESIZE_BORDER 8
+
+#define RESIZE_NONE         0
+#define RESIZE_TOP          1
+#define RESIZE_BOTTOM       2
+#define RESIZE_LEFT         3
+#define RESIZE_RIGHT        4
+#define RESIZE_TOP_LEFT     5
+#define RESIZE_TOP_RIGHT    6
+#define RESIZE_BOTTOM_LEFT  7
+#define RESIZE_BOTTOM_RIGHT 8
+
 // Window Structure
 typedef struct comp_window {
     int id;
@@ -92,6 +104,18 @@ typedef struct comp_window {
     uint32_t shmem_id;
     uint32_t reply_port; // Added for input forwarding
     uint32_t *buffer;
+    
+    // Window Management
+    int maximized;
+    int saved_x, saved_y, saved_w, saved_h;
+    
+    // Animation
+    int is_animating;
+    int anim_start_x, anim_start_y, anim_start_w, anim_start_h;
+    int anim_target_x, anim_target_y, anim_target_w, anim_target_h;
+    uint64_t anim_start_time;
+    uint64_t anim_duration;
+    
     struct comp_window *next;
     struct comp_window *prev;
 } comp_window_t;
@@ -112,6 +136,107 @@ typedef struct {
 
 static int mouse_x = 0, mouse_y = 0;
 static uint32_t mouse_buttons = 0;
+
+static comp_window_t *resizing_window = NULL;
+static int resize_edge = RESIZE_NONE;
+
+static uint64_t get_time_ms() {
+    struct { uint64_t tv_sec; uint64_t tv_nsec; } ts;
+    syscall1(SYS_CLOCK_GETTIME, (uint64_t)&ts);
+    return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static int check_resize_edge(comp_window_t *win, int mx, int my) {
+    if (!win || !win->active || !win->visible || win->maximized) return RESIZE_NONE;
+    
+    int x = win->x;
+    int y = win->y;
+    int w = win->width;
+    int h = win->height;
+    
+    int near_left = (mx >= x - RESIZE_BORDER && mx < x + RESIZE_BORDER);
+    int near_right = (mx >= x + w - RESIZE_BORDER && mx < x + w + RESIZE_BORDER);
+    int near_top = (my >= y - RESIZE_BORDER && my < y + RESIZE_BORDER);
+    int near_bottom = (my >= y + h - RESIZE_BORDER && my < y + h + RESIZE_BORDER);
+    int over_window = (mx >= x && mx < x + w && my >= y && my < y + h);
+    
+    if (near_left && near_top) return RESIZE_TOP_LEFT;
+    if (near_right && near_top) return RESIZE_TOP_RIGHT;
+    if (near_left && near_bottom) return RESIZE_BOTTOM_LEFT;
+    if (near_right && near_bottom) return RESIZE_BOTTOM_RIGHT;
+    
+    if (over_window && near_top && my < y + 28) return RESIZE_TOP; 
+    if (near_bottom) return RESIZE_BOTTOM;
+    if (near_left) return RESIZE_LEFT;
+    if (near_right) return RESIZE_RIGHT;
+    
+    return RESIZE_NONE;
+}
+
+static void snap_window(comp_window_t *win, int type) {
+    if (!win) return;
+    
+    int target_x = win->x;
+    int target_y = win->y;
+    int target_w = win->width;
+    int target_h = win->height;
+    
+    if (type == 1) { // Left
+        target_x = 0;
+        target_y = 0;
+        target_w = fb_info.width / 2;
+        target_h = fb_info.height;
+    } else if (type == 2) { // Right
+        target_x = fb_info.width / 2;
+        target_y = 0;
+        target_w = fb_info.width / 2;
+        target_h = fb_info.height;
+    } else if (type == 3) { // Maximize
+        target_x = 0;
+        target_y = 0;
+        target_w = fb_info.width;
+        target_h = fb_info.height;
+    }
+    
+    // Start animation
+    win->is_animating = 1;
+    win->anim_start_x = win->x;
+    win->anim_start_y = win->y;
+    win->anim_start_w = win->width;
+    win->anim_start_h = win->height;
+    win->anim_target_x = target_x;
+    win->anim_target_y = target_y;
+    win->anim_target_w = target_w;
+    win->anim_target_h = target_h;
+    win->anim_start_time = get_time_ms();
+    win->anim_duration = 200; // 200ms
+}
+
+static void update_animations() {
+    uint64_t now = get_time_ms();
+    
+    for (comp_window_t *w = windows_list; w; w = w->next) {
+        if (w->is_animating) {
+            uint64_t elapsed = now - w->anim_start_time;
+            if (elapsed >= w->anim_duration) {
+                w->x = w->anim_target_x;
+                w->y = w->anim_target_y;
+                w->width = w->anim_target_w;
+                w->height = w->anim_target_h;
+                w->is_animating = 0;
+                dirty = 1;
+            } else {
+                // Lerp
+                int t = (elapsed * 1000) / w->anim_duration; // 0..1000
+                w->x = w->anim_start_x + ((w->anim_target_x - w->anim_start_x) * t) / 1000;
+                w->y = w->anim_start_y + ((w->anim_target_y - w->anim_start_y) * t) / 1000;
+                w->width = w->anim_start_w + ((w->anim_target_w - w->anim_start_w) * t) / 1000;
+                w->height = w->anim_start_h + ((w->anim_target_h - w->anim_start_h) * t) / 1000;
+                dirty = 1;
+            }
+        }
+    }
+}
 
 // Mouse State
 static int last_mouse_x = 0, last_mouse_y = 0;
@@ -205,50 +330,123 @@ static void handle_mouse_event(int x, int y, uint32_t buttons) {
     int released = !(mouse_buttons & 1) && (last_mouse_buttons & 1);
     
     if (clicked) {
-        comp_window_t *hit = get_window_at(mouse_x, mouse_y);
-        if (hit) {
-            focus_window(hit);
-            
-            // Check if title bar (drag)
-            if (mouse_y >= hit->y && mouse_y < hit->y + 28) {
-                // Check Close Button (Top Right)
-                if (mouse_x >= hit->x + hit->width - 28 && mouse_x <= hit->x + hit->width - 8 &&
-                    mouse_y >= hit->y + 4 && mouse_y <= hit->y + 24) {
-                    destroy_window(hit);
-                    // Don't continue, just return, but we need to update last state
-                    // Actually if we destroy, 'hit' is invalid.
-                    goto update_state;
-                }
-                
-                drag_window = hit;
-                drag_off_x = mouse_x - hit->x;
-                drag_off_y = mouse_y - hit->y;
+        // 1. Find target (Resize edge or Window content)
+        comp_window_t *target = NULL;
+        int edge = RESIZE_NONE;
+        
+        // Iterate front to back (tail is top)
+        comp_window_t *w = windows_list;
+        while (w && w->next) w = w->next; 
+        
+        while (w) {
+            edge = check_resize_edge(w, mouse_x, mouse_y);
+            if (edge != RESIZE_NONE) {
+                target = w;
+                break;
             }
+            // Check content hit
+            if (mouse_x >= w->x && mouse_x < w->x + w->width &&
+                mouse_y >= w->y && mouse_y < w->y + w->height) {
+                target = w;
+                break;
+            }
+            w = w->prev;
+        }
+        
+        if (target) {
+            focus_window(target);
+            comp_window_t *hit = target;
             
-            // Forward Click to App
-            if (hit->reply_port > 0) {
-                ipc_message_t fwd;
-                fwd.msg_id = MSG_INPUT_EVENT;
-                fwd.size = sizeof(msg_input_event_t);
-                msg_input_event_t *fe = (msg_input_event_t *)fwd.data;
-                fe->type = EVENT_MOUSE_DOWN;
-                fe->code = 1; // Left button
-                fe->x = mouse_x - hit->x;
-                fe->y = mouse_y - (hit->y + 28); // Content coords
-                syscall3(SYS_IPC_SEND, hit->reply_port, (uint64_t)&fwd, 0);
-                dirty = 1;
+            // Prioritize Resize over Drag if explicitly on edge
+            // But Title Bar (Top) is tricky.
+            // If RESIZE_TOP, check if we are in the "drag zone" vs "resize zone".
+            // For now, if edge is detected, we resize.
+            // Exception: If RESIZE_TOP and we are NOT at the very top pixel row?
+            // Let's just use edge.
+            
+            if (edge != RESIZE_NONE && !hit->maximized) {
+                resizing_window = target;
+                resize_edge = edge;
+            } else {
+                // Title Bar / Content
+                if (mouse_y >= hit->y && mouse_y < hit->y + 28) {
+                     // Close Button
+                     if (mouse_x >= hit->x + hit->width - 28 && mouse_x <= hit->x + hit->width - 8 &&
+                        mouse_y >= hit->y + 4 && mouse_y <= hit->y + 24) {
+                        destroy_window(hit);
+                        goto update_state;
+                    }
+                    
+                    // Restore if maximized and dragging
+                    if (hit->maximized) {
+                        hit->maximized = 0;
+                        // Restore logic (simple centering)
+                        hit->width = hit->saved_w ? hit->saved_w : 600;
+                        hit->height = hit->saved_h ? hit->saved_h : 400;
+                        hit->x = mouse_x - hit->width/2;
+                        hit->y = mouse_y - 14;
+                    }
+                    
+                    drag_window = hit;
+                    drag_off_x = mouse_x - hit->x;
+                    drag_off_y = mouse_y - hit->y;
+                } else {
+                    // Content Click
+                    if (hit->reply_port > 0) {
+                        ipc_message_t fwd;
+                        fwd.msg_id = MSG_INPUT_EVENT;
+                        fwd.size = sizeof(msg_input_event_t);
+                        msg_input_event_t *fe = (msg_input_event_t *)fwd.data;
+                        fe->type = EVENT_MOUSE_DOWN;
+                        fe->code = 1; 
+                        fe->x = mouse_x - hit->x;
+                        fe->y = mouse_y - (hit->y + 28);
+                        syscall3(SYS_IPC_SEND, hit->reply_port, (uint64_t)&fwd, 0);
+                        dirty = 1;
+                    }
+                }
             }
         }
     }
     
     if (released) {
+        if (drag_window) {
+            // Snapping
+            if (mouse_x <= 10) snap_window(drag_window, 1); // Left
+            else if (mouse_x >= fb_info.width - 10) snap_window(drag_window, 2); // Right
+            else if (mouse_y <= 10) snap_window(drag_window, 3); // Maximize
+        }
         drag_window = NULL;
+        resizing_window = NULL;
+        resize_edge = RESIZE_NONE;
     }
     
-    if (mouse_buttons & 1 && drag_window) {
-        drag_window->x = mouse_x - drag_off_x;
-        drag_window->y = mouse_y - drag_off_y;
-        dirty = 1;
+    if (mouse_buttons & 1) {
+        if (resizing_window) {
+             int dx = mouse_x - last_mouse_x;
+             int dy = mouse_y - last_mouse_y;
+             
+             if (resize_edge == RESIZE_RIGHT || resize_edge == RESIZE_TOP_RIGHT || resize_edge == RESIZE_BOTTOM_RIGHT)
+                 resizing_window->width += dx;
+             if (resize_edge == RESIZE_LEFT || resize_edge == RESIZE_TOP_LEFT || resize_edge == RESIZE_BOTTOM_LEFT) {
+                 resizing_window->x += dx;
+                 resizing_window->width -= dx;
+             }
+             if (resize_edge == RESIZE_BOTTOM || resize_edge == RESIZE_BOTTOM_LEFT || resize_edge == RESIZE_BOTTOM_RIGHT)
+                 resizing_window->height += dy;
+             if (resize_edge == RESIZE_TOP || resize_edge == RESIZE_TOP_LEFT || resize_edge == RESIZE_TOP_RIGHT) {
+                 resizing_window->y += dy;
+                 resizing_window->height -= dy;
+             }
+             
+             if (resizing_window->width < 100) resizing_window->width = 100;
+             if (resizing_window->height < 100) resizing_window->height = 100;
+             dirty = 1;
+        } else if (drag_window) {
+            drag_window->x = mouse_x - drag_off_x;
+            drag_window->y = mouse_y - drag_off_y;
+            dirty = 1;
+        }
     }
 
 update_state:
@@ -522,6 +720,9 @@ void _start(void) {
                 handle_key_event(evt.code);
             }
         }
+        
+        // Update Animations
+        update_animations();
         
         // Render if dirty
         if (dirty) {

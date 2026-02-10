@@ -89,6 +89,23 @@ void panic(const char *fmt, ...) {
     for (;;) __asm__("hlt");
 }
 
+// Waiters for IRQs
+static task_t *irq_waiters[256] = {0};
+
+void irq_register_waiter(int irq, task_t *task) {
+    if (irq < 0 || irq >= 256) return;
+    irq_waiters[irq] = task;
+}
+
+void irq_notify_waiter(int irq) {
+    if (irq < 0 || irq >= 256) return;
+    task_t *waiter = irq_waiters[irq];
+    if (waiter) {
+        task_unblock(waiter);
+        irq_waiters[irq] = NULL; // One-shot
+    }
+}
+
 uint64_t isr_handler(struct interrupt_frame *frame) {
     // ---- Timer IRQ (Vector 32) — Preemptive scheduling ----
     if (frame->int_no == 32) {
@@ -97,6 +114,9 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
             lapic_eoi();
         else
             pic_send_eoi(0);
+
+        // Notify any task waiting for timer (e.g. sleep)
+        irq_notify_waiter(0); // IRQ 0
 
         // Call scheduler — may return a different task's RSP
         uint64_t new_rsp = scheduler_switch((registers_t *)frame);
@@ -182,12 +202,14 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
 
     // ---- IRQ 1 (Keyboard, Vector 33) ----
     if (frame->int_no == 33) {
-        keyboard_handler(frame);
+        // keyboard_handler(frame); // Disabled for userspace driver
+        irq_notify_waiter(1);
     }
 
     // ---- IRQ 12 (Mouse, Vector 44) ----
     if (frame->int_no == 44) {
-        mouse_handler();
+        // mouse_handler(); // Disabled for userspace driver
+        irq_notify_waiter(12);
     }
 
     // ---- AHCI MSI (Vector 46) ----
