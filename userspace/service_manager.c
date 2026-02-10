@@ -9,8 +9,8 @@ void _start(void) {
     // Debug: Simple loop to verify we reached user mode
     // syscall3(SYS_WRITE, 1, (long)"[SM] ALIVE\n", 12);
     
-    const char *msg = "[SM] Service Manager (PID 1) Started.\n";
-    syscall3(SYS_WRITE, 1, (long)msg, 38);
+    const char *msg = "[SM] Service Manager (PID 1) v2 Started.\n";
+    syscall3(SYS_WRITE, 1, (long)msg, 41);
 
     // 1. Spawn Compositor (Critical GUI Service)
     const char *comp_path = "compositor.elf";
@@ -20,6 +20,13 @@ void _start(void) {
         syscall3(SYS_WRITE, 1, (long)"[SM] Started Compositor.\n", 25);
     } else {
         syscall3(SYS_WRITE, 1, (long)"[SM] Failed to start Compositor!\n", 33);
+    }
+    
+    // 1b. Spawn Panel (Desktop UI)
+    const char *panel_path = "panel.elf";
+    long panel_pid = syscall1(SYS_PROC_EXEC, (long)panel_path);
+    if (panel_pid > 0) {
+         syscall3(SYS_WRITE, 1, (long)"[SM] Started Panel.\n", 20);
     }
 
     // 2. Start Keyboard Driver

@@ -58,6 +58,13 @@ static void smp_ap_entry(struct limine_smp_info *info) {
     // 5. Initialize LAPIC (and Timer)
     lapic_init();
     
+    // Disable SMAP/SMEP (Bits 20, 21 of CR4)
+    uint64_t cr4;
+    __asm__ volatile ("mov %%cr4, %0" : "=r"(cr4));
+    cr4 &= ~(1 << 20); // SMEP
+    cr4 &= ~(1 << 21); // SMAP
+    __asm__ volatile ("mov %0, %%cr4" : : "r"(cr4));
+    
     // 6. Signal we are ready
     kprintf("[SMP] CPU %d (LAPIC %d) Online!\n", cpu->cpu_id, cpu->lapic_id);
     

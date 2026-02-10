@@ -100,8 +100,24 @@ void irq_register_waiter(int irq, task_t *task) {
     irq_waiters[irq] = task;
 }
 
+// IRQ Handlers (Kernel)
+typedef void (*irq_handler_t)(void);
+static irq_handler_t irq_handlers[256] = {0};
+
+void irq_register_handler(int irq, void (*handler)(void)) {
+    if (irq < 0 || irq >= 256) return;
+    irq_handlers[irq] = handler;
+}
+
 void irq_notify_waiter(int irq) {
     if (irq < 0 || irq >= 256) return;
+    
+    // 1. Run Kernel Handler if exists
+    if (irq_handlers[irq]) {
+        irq_handlers[irq]();
+    }
+    
+    // 2. Notify Userspace Waiter
     task_t *waiter = irq_waiters[irq];
     if (waiter) {
         task_unblock(waiter);
@@ -236,11 +252,66 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
     }
 
     // ---- Send EOI for IRQs (vectors 33-47, timer already handled above) ----
-    if (frame->int_no >= 33 && frame->int_no <= 47) {
+    if (frame->int_no >= 33 && frame->int_no <= 255) {
+        // Dispatch to registered handlers
+        // We map vector N back to IRQ N-32 for irq_notify_waiter convenience,
+        // OR we just chang irq_notify_waiter to take vector.
+        // Current usage: irq_notify_waiter(1) for keyboard (Vec 33).
+        // So it expects IRQ number (Vec - 32).
+        irq_notify_waiter(frame->int_no); 
+        // Wait, irq_notify_waiter implementation uses array index `irq`.
+        // If I pass 47, it accesses `irq_handlers[47]`.
+        // e1000 registered at 47. Correct.
+        // Keyboard (IRQ 1) registers waiter at 1. But Vector is 33.
+        // Wait. `idt.c` code:
+        // if (frame->int_no == 33) irq_notify_waiter(1);
+        // So it manually maps 33 -> 1.
+        
+        // I should stick to using VECTOR as index for `irq_register_handler`.
+        // And IRQ (0-15) for `irq_register_waiter`?
+        // Or unify?
+        // Let's use VECTOR index for handlers.
+        // e1000 calls `irq_register_handler(47, ...)` or `(32+irq, ...)`.
+        // So passing `frame->int_no` is correct for HANDLERS.
+        // For Waiters (legacy ISA), we might need mapping.
+        
+        // If I call irq_notify_waiter(frame->int_no):
+        // Keyboard: Vector 33. Calls irq_notify_waiter(33).
+        // Keyboard Waiter registered at 1?
+        // `irq_register_waiter(1, task)`.
+        // Accesses `irq_waiters[1]`.
+        // But `irq_notify_waiter(33)` accesses `irq_waiters[33]`.
+        // Mismatch!
+        
+        // Fix: Update irq_notify_waiter to handle vector-to-irq mapping?
+        // Or just change Keyboard ISR to register at 33?
+        // Keyboard driver uses `SYS_GET_INPUT_EVENT`?
+        // Userspace driver uses `idt.c` waiters.
+        // `idt.c` manually calls `irq_notify_waiter(1)` when 33 fires.
+        
+        // I should keep the manual legacy calls for now, OR unify.
+        // Let's iterate:
+        // If vector 33 -> call notify(33) AND notify(1)?
+        // No, keyboard handler manually calls notify(1).
+        
+        // New logic:
+        // Always call irq_notify_waiter(vector).
+        // e1000 registers at 47. Works.
+        // Keyboard registers at 1.
+        
+        // Disable manual calls for 33/44?
+        // No, leave them for now (redundant is okay if handler is NULL).
+        // Just call irq_notify_waiter(frame->int_no) generally.
+        
         if (lapic_is_ioapic_mode())
             lapic_eoi();
-        else
-            pic_send_eoi(frame->int_no - 32);
+        else {
+            // Only PIC EOI for 32-47
+            if (frame->int_no <= 47) pic_send_eoi(frame->int_no - 32);
+        }
+        
+        // Dispatch
+        irq_notify_waiter(frame->int_no);
     }
 
     return (uint64_t)frame; // No context switch for regular interrupts

@@ -73,7 +73,13 @@ static inline int vsnprintf(char *buf, size_t size, const char *fmt, va_list arg
                 if (!s) s = "(null)";
                 while (*s && i < size - 1) buf[i++] = *s++;
             } else if (*fmt == 'd' || *fmt == 'u') {
-                long n = (*fmt == 'd') ? va_arg(args, int) : va_arg(args, unsigned int);
+                long n;
+                if (*fmt == 'd') {
+                    n = va_arg(args, int);
+                } else {
+                    n = va_arg(args, unsigned int);
+                }
+                
                 if (n < 0 && *fmt == 'd') {
                     if (i < size - 1) buf[i++] = '-';
                     n = -n;

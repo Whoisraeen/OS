@@ -285,6 +285,13 @@ void _start(void) {
 
     // Initialize Keyboard
     keyboard_init();
+    
+    // Disable SMAP/SMEP (Bits 20, 21 of CR4)
+    uint64_t cr4;
+    __asm__ volatile ("mov %%cr4, %0" : "=r"(cr4));
+    cr4 &= ~(1 << 20); // SMEP
+    cr4 &= ~(1 << 21); // SMAP
+    __asm__ volatile ("mov %0, %%cr4" : : "r"(cr4));
 
     // Initialize PMM
     pmm_init();
@@ -363,21 +370,19 @@ void _start(void) {
     pci_init();
 
     // Initialize AHCI Storage
-    ahci_init();
+    // ahci_init();
 
     // Initialize E1000 Network Driver
     e1000_init();
     
     // Initialize lwIP Network Interface (Adapter)
-    // We pass NULL for now as we don't have the full lwIP stack initialized
-    void ethernetif_init(void *netif); // Forward decl
-    ethernetif_init(NULL);
+    // ethernetif_init(NULL);
 
     // Initialize BGA Graphics (if available)
-    bga_init();
+    // bga_init();
 
     // Initialize Audio (HDA)
-    hda_init();
+    // hda_init();
 
     // Initialize block device layer and register AHCI
     block_init();

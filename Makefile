@@ -124,7 +124,7 @@ $(ISO_IMAGE): $(KERNEL_BIN) limine initrd.tar
 	./limine/limine bios-install $(ISO_IMAGE)
 
 run: $(ISO_IMAGE) disk.img
-	qemu-system-x86_64 -cdrom $(ISO_IMAGE) -M q35 -serial stdio \
+	qemu-system-x86_64 -cdrom $(ISO_IMAGE) -M q35 -serial file:serial.log \
 	-drive id=disk,file=disk.img,if=none,format=raw \
 	-device ahci,id=ahci \
 	-device ide-hd,drive=disk,bus=ahci.0

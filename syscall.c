@@ -116,7 +116,7 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
     uint32_t current_pid = task_current_id();
     
     // DEBUG: Trace syscalls
-    // kprintf("[SYSCALL] PID %u called sys_%lu(%lx, %lx, %lx)\n", current_pid, num, arg1, arg2, arg3);
+    kprintf("[SYSCALL] PID %u called sys_%lu(%lx, %lx, %lx)\n", current_pid, num, arg1, arg2, arg3);
 
     switch (num) {
         case SYS_EXIT:
@@ -586,6 +586,7 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
 
         // === Process Management Syscalls ===
         case SYS_PROC_EXEC: {
+            kprintf("[SYSCALL] SYS_PROC_EXEC called. Path ptr: %lx\n", arg1);
             if (!arg1) return (uint64_t)-1;
 
             // Check exec capability
@@ -1071,6 +1072,10 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
         case SYS_LISTEN:
         case SYS_ACCEPT:
             return (uint64_t)-1;
+
+        case 48:
+             kprintf("[SYSCALL] Syscall 48 called by PID %u! Args: %lx, %lx, %lx\n", current_pid, arg1, arg2, arg3);
+             return 0;
 
         default:
             kprintf("[SYSCALL] Unknown #%lu from PID %u\n", num, current_pid);

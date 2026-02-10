@@ -275,7 +275,7 @@ void ahci_init(void) {
     abar->ghc |= AHCI_GHC_AE;
     
     // Enable MSI (Vector 46)
-    if (pci_enable_msi(dev, 46, 0) == 0) {
+    if (0 && pci_enable_msi(dev, 46, 0) == 0) {
         kprintf("[AHCI] MSI Enabled (Vector 46)\n");
     } else {
         kprintf("[AHCI] Warning: MSI Enable Failed, falling back to polling/Legacy IRQ\n");

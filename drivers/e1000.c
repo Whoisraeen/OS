@@ -1,3 +1,4 @@
+#include "idt.h"
 #include "e1000.h"
 #include "pci.h"
 #include "console.h"
@@ -5,7 +6,7 @@
 #include "vmm.h"
 #include "pmm.h"
 #include "string.h"
-#include "idt.h"
+#include "ioapic.h"
 
 static e1000_state_t e1000;
 
@@ -122,11 +123,37 @@ void e1000_init(void) {
     e1000_write_reg(E1000_CTRL, E1000_CTRL_RST);
     // Wait?
     
+    // Register ISR for MSI (Vector 47)
+    // Note: If we use Legacy, we'll register that instead.
+    
     // Enable MSI (Vector 47)
-    if (pci_enable_msi(e1000.pci_dev, 47, 0) == 0) {
+    // FORCE DISABLED to debug Vector 0 panic
+    if (0 && pci_enable_msi(e1000.pci_dev, 47, 0) == 0) {
         kprintf("[E1000] MSI Enabled (Vector 47)\n");
+        irq_register_handler(47, e1000_isr);
     } else {
-        kprintf("[E1000] MSI Failed\n");
+        kprintf("[E1000] MSI Failed. Falling back to Legacy IRQ %d\n", e1000.pci_dev->irq_line);
+        
+        // Disable Legacy Interrupt Disable bit (ensure it's clear)
+        // pci_enable_bus_master already enables IO/MEM/Master.
+        // We assume INTx is enabled by default.
+        
+        uint8_t irq = e1000.pci_dev->irq_line;
+        uint8_t vector = 32 + irq;
+        
+        // Map IOAPIC
+        // #include "ioapic.h" -> Moved to top
+        // Active Low? Edge/Level?
+        // PCI interrupts are usually Level Triggered, Active Low.
+        // IOAPIC_LEVEL | IOAPIC_ACTIVE_LOW
+        // But QEMU might just work with defaults. 
+        // Let's try matching standard ISA first or just unmasking.
+        
+        // GSI = irq. Vector = 32+irq. Dest=0. Flags=Level|ActiveLow?
+        ioapic_route_irq(irq, vector, 0, 0); // Try defaults (Edge/High) first? Or just Unmask?
+        ioapic_unmask(irq);
+        
+        irq_register_handler(vector, e1000_isr);
     }
     
     // Link Up
@@ -173,11 +200,11 @@ void e1000_init(void) {
     e1000.tx_cur = 0;
     
     // Enable Interrupts
-    e1000_write_reg(E1000_IMS, E1000_ICR_RXT0 | E1000_ICR_LSC);
+    // e1000_write_reg(E1000_IMS, E1000_ICR_RXT0 | E1000_ICR_LSC);
     
     // Enable RX/TX
-    e1000_write_reg(E1000_RCTL, E1000_RCTL_EN | E1000_RCTL_BAM | E1000_RCTL_MPE);
-    e1000_write_reg(E1000_TCTL, E1000_TCTL_EN | E1000_TCTL_PSP);
+    // e1000_write_reg(E1000_RCTL, E1000_RCTL_EN | E1000_RCTL_BAM | E1000_RCTL_MPE);
+    // e1000_write_reg(E1000_TCTL, E1000_TCTL_EN | E1000_TCTL_PSP);
 }
 
 int e1000_send_packet(const void *data, uint16_t len) {

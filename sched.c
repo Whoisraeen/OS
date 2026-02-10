@@ -233,9 +233,33 @@ int task_create_user(const char *name, const void *elf_data, size_t size, uint32
     uint64_t user_stack_top = USER_STACK_TOP;
     uint64_t user_stack_base = user_stack_top - USER_STACK_SIZE;
 
+    uint64_t last_stack_phys = 0;
     for (uint64_t addr = user_stack_base; addr < user_stack_top; addr += 4096) {
         uint64_t phys = (uint64_t)pmm_alloc_page();
+        if (addr + 4096 >= user_stack_top) last_stack_phys = phys;
         vmm_map_user_page(addr, phys); // Uses current CR3 = user PML4
+    }
+    
+    // Initialize Stack (argc=0, argv=NULL, envp=NULL)
+    // We need to write 3 uint64_t zeros at the top of the stack
+    if (last_stack_phys) {
+        uint64_t *stack_page = (uint64_t *)(last_stack_phys + vmm_get_hhdm_offset());
+        // Stack grows down. Top is at offset 4096.
+        // We push 3 values:
+        // [4088] = 0 (envp terminator?)
+        // [4080] = 0 (argv terminator?)
+        // [4072] = 0 (argc)
+        // RSP points to 4072.
+        
+        // Actually crt0 does: pop rax (argc).
+        // So rsp must point to argc.
+        
+        stack_page[511] = 0; // envp
+        stack_page[510] = 0; // argv
+        stack_page[509] = 0; // argc
+        
+        // Adjust RSP
+        user_stack_top -= 24; 
     }
 
     // Restore CR3
@@ -312,6 +336,7 @@ int task_create_user(const char *name, const void *elf_data, size_t size, uint32
     // 7. NOW enqueue the fully-initialized task
     cpu_t *target_cpu = smp_get_cpu_by_id(task->cpu_id);
     if (target_cpu) {
+        kprintf("[SCHED] Enqueuing task %d on CPU %d (lock=%d)\n", slot, task->cpu_id, target_cpu->lock.locked);
         spinlock_acquire(&target_cpu->lock);
         sched_enqueue(target_cpu, task);
         spinlock_release(&target_cpu->lock);
@@ -444,10 +469,9 @@ uint64_t scheduler_switch(registers_t *regs) {
     next->state = TASK_RUNNING;
     cpu->current_task = next;
 
-    // 4. Update TSS RSP0 (kernel stack for when this task takes an interrupt)
+    // Update TSS RSP0 for the new task so interrupts/syscalls from Ring 3 work
     if (next->stack_base) {
-        uint64_t kstack_top = (uint64_t)next->stack_base + TASK_STACK_SIZE;
-        cpu->tss.rsp0 = kstack_top;
+        cpu->tss.rsp0 = (uint64_t)next->stack_base + TASK_STACK_SIZE;
     }
 
     // 5. Switch address space if needed

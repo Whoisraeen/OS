@@ -84,9 +84,12 @@ syscall_entry:
     push rcx    ; Save User RIP
 
     ; Switch to Kernel Segments
-    mov ax, 0x10
-    mov ds, ax
-    mov es, ax
+    ; Switch to Kernel Segments
+    push rbx
+    mov bx, 0x10
+    mov ds, bx
+    mov es, bx
+    pop rbx
     ; SS is already Kernel (handled by CPU)
 
     ; Remap arguments for C function
