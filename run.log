@@ -1,30 +1,47 @@
-gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -Inet/include -c syscall.c -o syscall.o
-syscall.c: In function ‘tcp_recv_cb’:
-syscall.c:48:53: warning: unused parameter ‘pcb’ [-Wunused-parameter]
-   48 | static err_t tcp_recv_cb(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err) {
-      |                                     ~~~~~~~~~~~~~~~~^~~
-syscall.c: In function ‘syscall_handler’:
-syscall.c:1094:14: error: ‘SYS_WRITEV’ undeclared (first use in this function); did you mean ‘SYS_WRITE’?
- 1094 |         case SYS_WRITEV: {
-      |              ^~~~~~~~~~
-      |              SYS_WRITE
-syscall.c:1094:14: note: each undeclared identifier is reported only once for each function it appears in
-syscall.c:1100:43: error: ‘EBADF’ undeclared (first use in this function)
- 1100 |             if (!entry) return (uint64_t)-EBADF;
-      |                                           ^~~~~
-syscall.c:1107:98: error: ‘EFAULT’ undeclared (first use in this function)
- 1107 |             if (!is_user_address((uint64_t)uiov, sizeof(struct iovec) * arg3)) return (uint64_t)-EFAULT;
-      |                                                                                                  ^~~~~~
-syscall.c:1143:14: error: ‘SYS_ARCH_PRCTL’ undeclared (first use in this function)
- 1143 |         case SYS_ARCH_PRCTL: {
-      |              ^~~~~~~~~~~~~~
-syscall.c:1153:31: error: ‘EINVAL’ undeclared (first use in this function)
- 1153 |             return (uint64_t)-EINVAL;
-      |                               ^~~~~~
-syscall.c:1149:23: warning: this statement may fall through [-Wimplicit-fallthrough=]
- 1149 |             } else if (arg1 == 0x1001) {
-      |                       ^
-syscall.c:1156:9: note: here
- 1156 |         default:
-      |         ^~~~~~~
-make: *** [Makefile:51: syscall.o] Error 1
+nasm -felf64 interrupts.S -o interrupts.o
+ld -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -T linker.ld kernel.o gdt.o idt.o pic.o keyboard.o pmm.o vmm.o heap.o serial.o console.o vfs.o initrd.o syscall.o user.o shell.o timer.o sched.o mouse.o desktop.o speaker.o compositor.o elf.o ipc.o security.o spinlock.o cpu.o lapic.o mutex.o semaphore.o fd.o pipe.o signal.o futex.o vm_area.o acpi.o ioapic.o rtc.o driver.o pci.o dma.o devfs.o ahci.o bga.o block.o partition.o bcache.o ext2.o klog.o ksyms.o aio.o drivers/e1000.o drivers/hda.o net/sys_arch.o net/core/pbuf.o net/core/netif.o net/core/ip.o net/core/tcp.o net/core/arp.o compat/linux/linux_syscall.o interrupts.o -o kernel.elf
+# Create a directory for the ISO content
+mkdir -p iso_root
+# Copy the kernel, config, and initrd
+cp -f kernel.elf limine.cfg initrd.tar limine/limine-bios.sys limine/limine-bios-cd.bin limine/limine-uefi-cd.bin iso_root/
+# Create directory for EFI boot
+mkdir -p iso_root/EFI/BOOT
+cp -f limine/BOOTX64.EFI iso_root/EFI/BOOT/
+cp -f limine/BOOTIA32.EFI iso_root/EFI/BOOT/
+# Create the ISO using xorriso
+xorriso -as mkisofs -b limine-bios-cd.bin \
+	-no-emul-boot -boot-load-size 4 -boot-info-table \
+	--efi-boot limine-uefi-cd.bin \
+	-efi-boot-part --efi-boot-image --protective-msdos-label \
+	iso_root -o myos.iso
+xorriso 1.5.4 : RockRidge filesystem manipulator, libburnia project.
+
+Drive current: -outdev 'stdio:myos.iso'
+Media current: stdio file, overwriteable
+Media status : is blank
+Media summary: 0 sessions, 0 data blocks, 0 data,  272g free
+Added to ISO image: directory '/'='/mnt/r/Projects/OS/iso_root'
+xorriso : UPDATE :      10 files added in 1 seconds
+xorriso : UPDATE :      10 files added in 1 seconds
+xorriso : UPDATE :  32.95% done
+ISO image produced: 2452 sectors
+Written to medium : 2452 sectors at LBA 0
+Writing to 'stdio:myos.iso' completed successfully.
+
+# Install Limine to the ISO (BIOS boot support)
+./limine/limine bios-install myos.iso
+Physical block size of 512 bytes.
+Installing to GPT. Logical block size of 512 bytes.
+Secondary header at LBA 0x264f.
+Secondary header valid.
+GPT partition NOT specified. Attempting GPT embedding.
+New maximum count of partition entries: 44.
+Stage 2 to be located at 0x1a00 and 0x4c3800.
+Reminder: Remember to copy the limine-bios.sys file in either
+          the root, /boot, /limine, or /boot/limine directories of
+          one of the partitions on the device, or boot will fail!
+Limine BIOS stages installed successfully!
+qemu-system-x86_64 -cdrom myos.iso -M q35 -serial file:serial.log \
+-drive id=disk,file=disk.img,if=none,format=raw \
+-device ahci,id=ahci \
+-device ide-hd,drive=disk,bus=ahci.0

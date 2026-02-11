@@ -12,8 +12,8 @@
 #include "../../pmm.h"
 #include "../../vm_area.h"
 
-// External prototypes for RaeenOS syscall logic (implemented in syscall.c or elsewhere)
-extern uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3, struct interrupt_frame *regs);
+// External prototypes for RaeenOS syscall logic
+extern uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs);
 
 typedef struct {
     char sysname[65];
@@ -28,39 +28,63 @@ uint64_t linux_syscall_handler(struct interrupt_frame *regs) {
     uint64_t num = regs->rax;
     uint32_t pid = task_current_id();
 
+    // Linux Syscall Args: RDI, RSI, RDX, R10, R8, R9
+    uint64_t arg1 = regs->rdi;
+    uint64_t arg2 = regs->rsi;
+    uint64_t arg3 = regs->rdx;
+    uint64_t arg4 = regs->r10;
+    uint64_t arg5 = regs->r8;
+    uint64_t arg6 = regs->r9;
+
     switch (num) {
-        case LINUX_SYS_READ:
-            return syscall_handler(SYS_READ, regs->rdi, regs->rsi, regs->rdx, NULL);
+        case LINUX_SYS_READ: {
+            regs->rdi = arg1; regs->rsi = arg2; regs->rdx = arg3;
+            return syscall_handler(SYS_READ, regs);
+        }
 
-        case LINUX_SYS_WRITE:
-            return syscall_handler(SYS_WRITE, regs->rdi, regs->rsi, regs->rdx, NULL);
+        case LINUX_SYS_WRITE: {
+            regs->rdi = arg1; regs->rsi = arg2; regs->rdx = arg3;
+            return syscall_handler(SYS_WRITE, regs);
+        }
 
-        case LINUX_SYS_OPEN:
-            return syscall_handler(SYS_OPEN, regs->rdi, regs->rsi, 0, NULL);
+        case LINUX_SYS_OPEN: {
+            regs->rdi = arg1; regs->rsi = arg2; 
+            return syscall_handler(SYS_OPEN, regs);
+        }
 
-        case LINUX_SYS_CLOSE:
-            return syscall_handler(SYS_CLOSE, regs->rdi, 0, 0, NULL);
+        case LINUX_SYS_CLOSE: {
+            regs->rdi = arg1;
+            return syscall_handler(SYS_CLOSE, regs);
+        }
 
-        case LINUX_SYS_LSEEK:
-            return syscall_handler(SYS_LSEEK, regs->rdi, regs->rsi, regs->rdx, NULL);
+        case LINUX_SYS_LSEEK: {
+            regs->rdi = arg1; regs->rsi = arg2; regs->rdx = arg3;
+            return syscall_handler(SYS_LSEEK, regs);
+        }
 
         case LINUX_SYS_MMAP: {
             // Linux mmap: arg1=addr, arg2=len, arg3=prot, arg4=flags, arg5=fd, arg6=offset
             // Native SYS_MMAP: arg1=hint, arg2=size, arg3=prot
-            // For now, map simple anonymous memory
-            return syscall_handler(SYS_MMAP, regs->rdi, regs->rsi, regs->rdx, NULL);
+            regs->rdi = arg1; regs->rsi = arg2; regs->rdx = arg3;
+            return syscall_handler(SYS_MMAP, regs);
         }
 
-        case LINUX_SYS_MUNMAP:
-            return syscall_handler(SYS_MUNMAP, regs->rdi, regs->rsi, 0, NULL);
+        case LINUX_SYS_MUNMAP: {
+            regs->rdi = arg1; regs->rsi = arg2;
+            return syscall_handler(SYS_MUNMAP, regs);
+        }
 
-        case LINUX_SYS_BRK:
-            return syscall_handler(SYS_BRK, regs->rdi, 0, 0, NULL);
+        case LINUX_SYS_BRK: {
+            regs->rdi = arg1;
+            return syscall_handler(SYS_BRK, regs);
+        }
 
         case LINUX_SYS_EXIT:
-        case LINUX_SYS_EXIT_GROUP:
-            syscall_handler(SYS_EXIT, regs->rdi, 0, 0, NULL);
+        case LINUX_SYS_EXIT_GROUP: {
+            regs->rdi = arg1;
+            syscall_handler(SYS_EXIT, regs);
             return 0;
+        }
 
         case LINUX_SYS_GETPID:
             return (uint64_t)pid;
@@ -71,24 +95,20 @@ uint64_t linux_syscall_handler(struct interrupt_frame *regs) {
         }
 
         case LINUX_SYS_ARCH_PRCTL: {
-            // Linux uses this to set FS/GS base
             // arg1 = code, arg2 = addr
             #define ARCH_SET_GS 0x1001
             #define ARCH_SET_FS 0x1002
-            #define ARCH_GET_FS 0x1003
-            #define ARCH_GET_GS 0x1004
-
-            if (regs->rdi == ARCH_SET_FS) {
-                return syscall_handler(SYS_SET_TLS, regs->rsi, 0, 0, NULL);
+            if (arg1 == ARCH_SET_FS) {
+                regs->rdi = arg2;
+                return syscall_handler(SYS_SET_TLS, regs);
             }
             return (uint64_t)-1;
         }
 
         case LINUX_SYS_UNAME: {
-            // Fill utsname struct
-            linux_utsname_t *name = (linux_utsname_t *)regs->rdi;
-            // TODO: check_user_pointer
-            strcpy(name->sysname, "Linux"); // Trick them!
+            linux_utsname_t *name = (linux_utsname_t *)arg1;
+            if (!is_user_address(arg1, sizeof(linux_utsname_t))) return (uint64_t)-1;
+            strcpy(name->sysname, "Linux");
             strcpy(name->nodename, "raeenos");
             strcpy(name->release, "5.15.0-raeenos");
             strcpy(name->version, "#1 SMP 2026");
@@ -97,12 +117,20 @@ uint64_t linux_syscall_handler(struct interrupt_frame *regs) {
         }
 
         case LINUX_SYS_SET_TID_ADDRESS:
-            // Often called by Glibc on startup. Just return PID for now.
             return (uint64_t)pid;
 
+        case LINUX_SYS_IOCTL:
+            // Just return success for common terminal ioctls
+            return 0;
+
+        case LINUX_SYS_FUTEX:
+            // Minimal futex (likely used by Glibc/Wine)
+            // arg1=uaddr, arg2=op, arg3=val
+            regs->rdi = arg1; regs->rsi = arg2; regs->rdx = arg3;
+            return syscall_handler(SYS_FUTEX, regs);
+
         default:
-            kprintf("[LINUX] Unsupported syscall #%lu from PID %u
-", num, pid);
+            kprintf("[LINUX] Unsupported syscall #%lu (arg1=%lx) from PID %u\n", num, arg1, pid);
             return (uint64_t)-1;
     }
 }

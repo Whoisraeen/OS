@@ -4,13 +4,13 @@
 #include <stdint.h>
 #include "idt.h"
 
-// ... existing includes ...
+// Forward declaration
+struct interrupt_frame;
 
 // Call this from kernel main
 void syscall_init(void);
 
-// ... existing definitions ...
-
+// Syscalls
 #define SYS_EXIT         0
 #define SYS_WRITE        1
 #define SYS_OPEN         2
@@ -34,6 +34,7 @@ void syscall_init(void);
 #define SYS_IPC_SHMEM_CREATE 17
 #define SYS_IPC_SHMEM_MAP    18
 #define SYS_IPC_SHMEM_UNMAP  19
+#define SYS_SEC_GETCAPS  20
 #define SYS_GETPID       39
 #define SYS_GETPPID      40
 #define SYS_PROC_EXEC    41
@@ -76,8 +77,7 @@ void syscall_init(void);
 #define SYS_SEND         85
 #define SYS_RECV         86
 
-
-// Handler
-uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5);
+// Handler - Simplified to just take the frame
+uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs);
 
 #endif

@@ -80,7 +80,6 @@ typedef struct task_t {
 // API
 void scheduler_init(void);
 int task_create(const char *name, void (*entry)(void));
-int task_create_user(const char *name, const void *elf_data, size_t size, uint32_t parent_pid);
 void task_exit(void);
 void task_yield(void);
 uint32_t task_current_id(void);
@@ -118,6 +117,8 @@ void task_exit_code(int code);
 
 // Fork the current process (COW). Returns child PID to parent, 0 to child, -1 on error.
 int task_fork(registers_t *parent_regs);
+
+int task_create_user(const char *name, const void *elf_data, size_t size, uint32_t parent_pid, abi_type_t abi);
 
 // Debug
 void scheduler_debug_print_tasks(void);

@@ -102,74 +102,78 @@ syscall_entry:
     ; Load Kernel RSP from TSS RSP0 (offset 92 in cpu_t)
     mov rsp, gs:[92]
 
-    ; Save User RFLAGS and RIP (RCX/R11 are clobbered by sysret)
-    push r11    ; Save User RFLAGS
-    push rcx    ; Save User RIP
-
-    ; Save ALL user GPRs that the C handler might clobber
-    ; (Preserve them across the call so userspace sees them unchanged)
-    push rdi
-    push rsi
-    push rdx
-    push r8
-    push r9
-    push r10
-    push rbx
-    push rbp
-    push r12
-    push r13
-    push r14
-    push r15
+    ; Synthesize struct interrupt_frame
+    push 0x1B           ; SS
+    push qword gs:[16]  ; RSP
+    push r11            ; RFLAGS
+    push 0x23           ; CS
+    push rcx            ; RIP
+    push 0              ; err
+    push 0              ; int
+    push rax            ; rax
+    push rbx            ; rbx
+    push rcx            ; rcx
+    push rdx            ; rdx
+    push rsi            ; rsi
+    push rdi            ; rdi
+    push rbp            ; rbp
+    push r8             ; r8
+    push r9             ; r9
+    push r10            ; r10
+    push r11            ; r11
+    push r12            ; r12
+    push r13            ; r13
+    push r14            ; r14
+    push r15            ; r15
+    mov ax, ds
+    push rax
+    mov ax, es
+    push rax
+    mov ax, fs
+    push rax
 
     ; Switch to Kernel Segments
-    push rax        ; save syscall number temporarily
     mov ax, 0x10
     mov ds, ax
     mov es, ax
-    pop rax         ; restore syscall number
-    ; SS is already Kernel (handled by CPU)
+    mov fs, ax
 
-    ; Remap arguments for C function (syscall_handler(num, arg1, arg2, arg3, regs))
-    mov rcx, rdx    ; 4th arg = User Arg3
-    mov rdx, rsi    ; 3rd arg = User Arg2
-    mov rsi, rdi    ; 2nd arg = User Arg1
-    mov rdi, rax    ; 1st arg = Syscall Number
-    xor r8d, r8d    ; 5th arg = NULL (no register frame for SYSCALL path)
-
+    ; Call C handler: syscall_handler(num, regs)
+    mov rdi, rax    ; 1st arg: num
+    mov rsi, rsp    ; 2nd arg: regs
     call syscall_handler
 
-    ; RAX now has return value — keep it
+    ; RAX has return value. Keep it.
 
-    ; Restore ALL user GPRs
+    ; Restore segment registers
+    pop rbx
+    mov fs, bx
+    pop rbx
+    mov es, bx
+    pop rbx
+    mov ds, bx
+
+    ; Restore GPRs
     pop r15
     pop r14
     pop r13
     pop r12
-    pop rbp
-    pop rbx
+    pop r11
     pop r10
     pop r9
     pop r8
-    pop rdx
-    pop rsi
+    pop rbp
     pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    add rsp, 8      ; Skip rax
 
-    ; Restore User Segments
-    push rax
-    mov ax, 0x1B
-    mov ds, ax
-    mov es, ax
-    pop rax
-
-    pop rcx     ; Restore User RIP
-    pop r11     ; Restore User RFLAGS
-
-    ; Restore User Stack from syscall_scratch (offset 16 in cpu_t)
-    mov rsp, gs:[16]
-
-    swapgs      ; Swap back to User GS
-
-    sysretq
+    add rsp, 16     ; Skip int, err
+    ; Stack is now: SS, RSP, RFLAGS, CS, RIP
+    swapgs
+    iretq
 
 ; -----------------------------------------------------------------------------
 ; Interrupt Service Routines (ISRs)

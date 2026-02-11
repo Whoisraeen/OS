@@ -56,7 +56,7 @@ typedef struct {
 
     // Idle Task (fallback when queue is empty)
     void *idle_task;
-} cpu_t;
+} __attribute__((packed)) cpu_t;
 
 // Compile-time offset verification for assembly compatibility
 _Static_assert(__builtin_offsetof(cpu_t, self) == 0,

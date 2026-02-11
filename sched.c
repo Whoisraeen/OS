@@ -237,14 +237,14 @@ int task_create(const char *name, void (*entry)(void)) {
     return task_create_ex(name, entry, true);
 }
 
-int task_create_user(const char *name, const void *elf_data, size_t size, uint32_t parent_pid) {
-    // 1. Create task slot WITHOUT enqueuing (entry=NULL, auto_enqueue=false)
-    //    This prevents the scheduler from running a half-initialized task
+int task_create_user(const char *name, const void *elf_data, size_t size, uint32_t parent_pid, abi_type_t abi) {
+    // 1. Create task slot WITHOUT enqueuing
     int slot = task_create_ex(name, NULL, false);
     if (slot < 0) return -1;
 
     task_t *task = &tasks[slot];
     task->parent_pid = parent_pid;
+    task->abi = abi;
 
     // 2. Create VMM context (PML4)
     task->cr3 = vmm_create_user_pml4();

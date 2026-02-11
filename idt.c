@@ -34,8 +34,7 @@ extern uint64_t fb_width;
 extern uint64_t fb_height;
 
 // Syscall handler
-extern uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3,
-                                 struct interrupt_frame *regs);
+extern uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs);
 
 void idt_set_gate(uint8_t num, uint64_t base, uint16_t sel, uint8_t flags) {
     idt[num].offset_low    = (base & 0xFFFF);
@@ -150,7 +149,7 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
 
     // ---- Syscall (int 0x80 = Vector 128) ----
     if (frame->int_no == 128) {
-        frame->rax = syscall_handler(frame->rax, frame->rdi, frame->rsi, frame->rdx, frame);
+        frame->rax = syscall_handler(frame->rax, frame);
         return (uint64_t)frame;
     }
 

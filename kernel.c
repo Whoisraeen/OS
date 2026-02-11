@@ -596,7 +596,7 @@ void _start(void) {
             if (sm_data) {
                 vfs_read(sm_node, 0, sm_node->length, (uint8_t*)sm_data);
                 
-                int pid = task_create_user("service_manager", sm_data, sm_node->length, 0);
+                int pid = task_create_user("service_manager", sm_data, sm_node->length, 0, ABI_NATIVE);
                 if (pid >= 0) {
                     console_printf("[KERNEL] Service Manager started (PID %d)\n", pid);
                 } else {
@@ -614,7 +614,7 @@ void _start(void) {
                  void *init_data = kmalloc(init_node->length);
                  if (init_data) {
                      vfs_read(init_node, 0, init_node->length, (uint8_t*)init_data);
-                     task_create_user("init", init_data, init_node->length, 0);
+                     task_create_user("init", init_data, init_node->length, 0, ABI_NATIVE);
                      kfree(init_data);
                  }
             }
