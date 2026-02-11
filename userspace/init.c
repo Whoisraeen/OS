@@ -1,21 +1,38 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <stdint.h>
 #include "font.h"
 #include "gui.h"
 #include "keymap.h"
-#include <unistd.h>
-#include <sys/syscall.h>
+#include "syscalls.h"
 
-// Direct syscall macros for IPC since musl doesn't know our custom syscalls yet
-#define syscall1(n, a1) syscall(n, a1)
-#define syscall2(n, a1, a2) syscall(n, a1, a2)
-#define syscall3(n, a1, a2, a3) syscall(n, a1, a2, a3)
+// Freestanding definitions
+typedef unsigned long size_t;
 
-// Import custom syscall numbers
-#include "../syscall.h"
+void *memset(void *s, int c, size_t n) {
+    unsigned char *p = s;
+    while (n--) *p++ = (unsigned char)c;
+    return s;
+}
 
+char *strncpy(char *dest, const char *src, size_t n) {
+    size_t i;
+    for (i = 0; i < n && src[i] != '\0'; i++)
+        dest[i] = src[i];
+    for ( ; i < n; i++)
+        dest[i] = '\0';
+    return dest;
+}
+
+void printf(const char *fmt, ...) {
+    // Determine length
+    int len = 0;
+    while (fmt[len]) len++;
+    syscall3(SYS_WRITE, 1, (uint64_t)fmt, len);
+}
+
+void exit(int code) {
+    syscall1(SYS_EXIT, code);
+    while(1);
+}
 // IPC Constants
 #define IPC_PORT_FLAG_RECEIVE (1 << 1)
 #define IPC_PORT_FLAG_SEND    (1 << 2)

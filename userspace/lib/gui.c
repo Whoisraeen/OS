@@ -83,13 +83,14 @@ void gui_draw_rect(gui_window_t *win, int x, int y, int w, int h, uint32_t color
 // For now, let's implement a dummy or simple one if font.h doesn't provide data.
 // Wait, font.h usually has the extern. We need font.c to be linked.
 
-extern const uint8_t font_bitmap[]; 
+// extern const uint8_t font_bitmap[]; 
 #define FONT_WIDTH 8
 #define FONT_HEIGHT 16
 
 void gui_draw_char(gui_window_t *win, int x, int y, char c, uint32_t color) {
     if (c < 32 || c > 126) c = '?';
-    const uint8_t *glyph = &font_bitmap[(c - 32) * 16];
+    // Use font_data from font.h
+    const uint8_t *glyph = font_data[c - 32];
     
     for (int row = 0; row < 16; row++) {
         uint8_t bits = glyph[row];

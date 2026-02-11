@@ -1,4 +1,5 @@
 #include "drivers/nvme.h"
+#include "block.h"
 #include "pci.h"
 #include "vmm.h"
 #include "pmm.h"
@@ -8,6 +9,10 @@
 #include "serial.h" // For kprintf
 
 static nvme_t nvme;
+
+// Forward Declarations
+void nvme_read_sector(uint64_t lba, void *buf);
+void nvme_write_sector(uint64_t lba, void *buf);
 
 // Helper to convert physical to virtual (HHDM)
 static inline void *p2v(uint64_t phys) {
@@ -144,6 +149,32 @@ static int nvme_submit_admin_cmd(nvme_sq_entry_t *cmd) {
     return status;
 }
 
+// Block Ops
+static int nvme_block_read(block_device_t *dev, uint64_t lba, uint32_t count, void *buf) {
+    (void)dev;
+    uint8_t *b = (uint8_t *)buf;
+    for (uint32_t i = 0; i < count; i++) {
+        nvme_read_sector(lba + i, b + (i * 512));
+    }
+    return 0;
+}
+
+static int nvme_block_write(block_device_t *dev, uint64_t lba, uint32_t count, const void *buf) {
+    (void)dev;
+    const uint8_t *b = (const uint8_t *)buf;
+    for (uint32_t i = 0; i < count; i++) {
+        nvme_write_sector(lba + i, (void *)(b + (i * 512)));
+    }
+    return 0;
+}
+
+static block_ops_t nvme_ops = {
+    .read_sectors = nvme_block_read,
+    .write_sectors = nvme_block_write
+};
+
+static block_device_t nvme_block_dev;
+
 static void nvme_identify(void) {
     // Allocate DMA buffer for Identify Controller (4KB)
     uint64_t buf_phys = (uint64_t)pmm_alloc_page();
@@ -196,6 +227,29 @@ static void nvme_identify(void) {
         // uint64_t ncap = *(uint64_t *)(buf_virt + 8); // Namespace Capacity
         
         kprintf("[NVMe] Found Namespace 1.\n");
+        
+        // Register Block Device
+        uint64_t nsze = *(uint64_t *)buf_virt; // Namespace Size (blocks)
+        // uint64_t ncap = *(uint64_t *)(buf_virt + 8); // Namespace Capacity
+        
+        kprintf("[NVMe] Namespace 1 Size: %lu sectors (%lu MB)\n", nsze, (nsze * 512) / (1024*1024));
+        
+        // Setup Block Device
+        nvme_block_dev.name[0] = 'n'; nvme_block_dev.name[1] = 'v'; nvme_block_dev.name[2] = 'm'; 
+        nvme_block_dev.name[3] = 'e'; nvme_block_dev.name[4] = '0'; nvme_block_dev.name[5] = 'n';
+        nvme_block_dev.name[6] = '1'; nvme_block_dev.name[7] = 0;
+        
+        nvme_block_dev.sector_size = 512; // Assuming LBA Fmt 0 is 512, which is typical for QEMU/Consumer
+        nvme_block_dev.sector_count = nsze;
+        nvme_block_dev.ops = &nvme_ops;
+        nvme_block_dev.private_data = NULL;
+        nvme_block_dev.parent = NULL;
+        nvme_block_dev.partition_index = -1;
+        
+        int idx = block_register(&nvme_block_dev);
+        if (idx >= 0) {
+            kprintf("[NVMe] Registered 'nvme0n1'\n");
+        }
     }
 }
 
@@ -311,6 +365,7 @@ void nvme_write_sector(uint64_t lba, void *buf) {
         kprintf("[NVMe] Write Error LBA %ld Status %x\n", lba, status);
     }
 }
+
 
 void nvme_init(pci_device_t *dev) {
     if (!dev) return;

@@ -13,7 +13,7 @@ CFLAGS = -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding \
          -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib \
          -mcmodel=small \
          $(MUSL_INC)
-LDFLAGS = -T linker.ld -static -z max-page-size=0x1000
+LDFLAGS = -T userspace/linker.ld -static -z max-page-size=0x1000
 
 # Targets
 APPS = initrd/init.elf initrd/compositor.elf initrd/service_manager.elf \
@@ -21,6 +21,10 @@ APPS = initrd/init.elf initrd/compositor.elf initrd/service_manager.elf \
        initrd/panel.elf initrd/audio_server.elf
 
 all: $(APPS)
+
+initrd/panel.elf: userspace/panel.c userspace/lib/gui.c $(MUSL_LIB)
+	mkdir -p initrd
+	$(CC) $(CFLAGS) userspace/panel.c userspace/lib/gui.c $(MUSL_LIB) -o $@ $(LDFLAGS)
 
 initrd/%.elf: userspace/%.c $(MUSL_LIB)
 	mkdir -p initrd

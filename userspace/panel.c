@@ -35,6 +35,11 @@ void on_start_click(gui_widget_t *w, void *data) {
     syscall1(SYS_PROC_EXEC, (long)"terminal.elf");
 }
 
+void on_doom_click(gui_widget_t *w, void *data) {
+    (void)w; (void)data;
+    syscall1(SYS_PROC_EXEC, (long)"doom.elf");
+}
+
 void on_shutdown_click(gui_widget_t *w, void *data) {
     (void)w; (void)data;
     syscall0(SYS_SHUTDOWN);
@@ -84,6 +89,8 @@ void _start(void) {
     
     gui_window_add_child(win, (gui_widget_t*)gui_create_button(4, 4, 60, 24, "Start", on_start_click));
     
+    gui_window_add_child(win, (gui_widget_t*)gui_create_button(70, 4, 60, 24, "Doom", on_doom_click));
+
     clock_label = (gui_widget_t*)gui_create_label(1024 - 80, 8, "00:00:00");
     gui_window_add_child(win, clock_label);
     
