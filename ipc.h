@@ -123,6 +123,9 @@ int ipc_shmem_unmap(uint32_t shmem_id, uint32_t pid);
 // Destroy shared memory region (when ref_count reaches 0)
 int ipc_shmem_destroy(uint32_t shmem_id, uint32_t pid);
 
+// Cleanup all IPC resources for a process
+void ipc_cleanup_process(uint32_t pid);
+
 // === Debugging ===
 
 // Print port statistics

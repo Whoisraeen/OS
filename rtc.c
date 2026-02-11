@@ -41,8 +41,9 @@ void rtc_init(void) {
 }
 
 void rtc_get_time(rtc_time_t *time) {
-    // Wait for update to complete
-    while (rtc_is_updating());
+    // Wait for update to complete (with timeout)
+    int timeout = 1000000;
+    while (rtc_is_updating() && timeout > 0) timeout--;
 
     uint8_t sec = cmos_read(RTC_SECONDS);
     uint8_t min = cmos_read(RTC_MINUTES);

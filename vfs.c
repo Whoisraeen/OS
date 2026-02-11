@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include "string.h"
 #include "fd.h"
+#include "serial.h"
 
 // Root filesystem node
 vfs_node_t *vfs_root = NULL;

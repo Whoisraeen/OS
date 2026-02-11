@@ -111,17 +111,6 @@ elf_load_result_t elf_load(const void *data, size_t size) {
     return result;
 }
 
-// Helper to get section name
-static const char *elf_get_section_name(const elf64_header_t *hdr, const uint8_t *data, int shndx) {
-    if (hdr->e_shstrndx == 0 || hdr->e_shstrndx >= hdr->e_shnum) return NULL;
-    
-    const elf64_shdr_t *shstr = (const elf64_shdr_t *)(data + hdr->e_shoff + hdr->e_shstrndx * hdr->e_shentsize);
-    const char *strtab = (const char *)(data + shstr->sh_offset);
-    
-    const elf64_shdr_t *sh = (const elf64_shdr_t *)(data + hdr->e_shoff + shndx * hdr->e_shentsize);
-    return strtab + sh->sh_name;
-}
-
 // Load relocatable kernel module
 int elf_load_module(const void *data, size_t size, void **entry_point) {
     if (!elf_validate(data, size)) return -1;

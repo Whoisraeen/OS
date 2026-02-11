@@ -103,6 +103,54 @@ static comp_window_t *windows_list = NULL;
 static int next_window_id = 1;
 static int dirty = 1;
 
+// Dirty Rectangle Tracking
+typedef struct {
+    int x1, y1, x2, y2;
+} dirty_rect_t;
+
+static dirty_rect_t global_dirty = {0, 0, 0, 0};
+
+static void mark_dirty(int x, int y, int w, int h) {
+    if (w <= 0 || h <= 0) return;
+    
+    // Initial case (first dirty of the frame)
+    if (global_dirty.x1 >= global_dirty.x2) {
+        global_dirty.x1 = x;
+        global_dirty.y1 = y;
+        global_dirty.x2 = x + w;
+        global_dirty.y2 = y + h;
+    } else {
+        if (x < global_dirty.x1) global_dirty.x1 = x;
+        if (y < global_dirty.y1) global_dirty.y1 = y;
+        if (x + w > global_dirty.x2) global_dirty.x2 = x + w;
+        if (y + h > global_dirty.y2) global_dirty.y2 = y + h;
+    }
+    
+    // Clamp to screen
+    if (global_dirty.x1 < 0) global_dirty.x1 = 0;
+    if (global_dirty.y1 < 0) global_dirty.y1 = 0;
+    if (global_dirty.x2 > (int)fb_info.width) global_dirty.x2 = fb_info.width;
+    if (global_dirty.y2 > (int)fb_info.height) global_dirty.y2 = fb_info.height;
+    
+    dirty = 1;
+}
+
+static void mark_full_dirty() {
+    global_dirty.x1 = 0;
+    global_dirty.y1 = 0;
+    global_dirty.x2 = fb_info.width;
+    global_dirty.y2 = fb_info.height;
+    dirty = 1;
+}
+
+static void reset_dirty() {
+    global_dirty.x1 = 0;
+    global_dirty.y1 = 0;
+    global_dirty.x2 = 0;
+    global_dirty.y2 = 0;
+    dirty = 0;
+}
+
 // Input Event
 typedef struct {
     uint32_t type; // 1=Key, 2=Mouse
@@ -236,7 +284,7 @@ static void destroy_window(comp_window_t *win) {
     }
     
     win->active = 0;
-    dirty = 1;
+    mark_dirty(win->x, win->y, win->width, win->height);
 }
 
 static void focus_window(comp_window_t *win) {
@@ -261,23 +309,7 @@ static void focus_window(comp_window_t *win) {
         win->next = NULL;
     }
     
-    dirty = 1;
-}
-
-static comp_window_t *get_window_at(int px, int py) {
-    // Check in reverse z-order (top first)
-    comp_window_t *tail = windows_list;
-    if (!tail) return NULL;
-    while (tail->next) tail = tail->next;
-    
-    for (comp_window_t *w = tail; w; w = w->prev) {
-        if (!w->visible) continue;
-        if (px >= w->x && px < w->x + w->width &&
-            py >= w->y && py < w->y + w->height) {
-            return w;
-        }
-    }
-    return NULL;
+    mark_dirty(win->x, win->y, win->width, win->height);
 }
 
 static void handle_key_event(uint32_t code) {
@@ -299,9 +331,15 @@ static void handle_key_event(uint32_t code) {
 }
 
 static void handle_mouse_event(int x, int y, uint32_t buttons) {
+    // Mark old cursor area dirty
+    mark_dirty(mouse_x - 10, mouse_y - 10, 40, 40);
+
     mouse_x = x;
     mouse_y = y;
     mouse_buttons = buttons;
+    
+    // Mark new cursor area dirty
+    mark_dirty(mouse_x - 10, mouse_y - 10, 40, 40);
     
     int clicked = (mouse_buttons & 1) && !(last_mouse_buttons & 1);
     int released = !(mouse_buttons & 1) && (last_mouse_buttons & 1);
@@ -400,6 +438,9 @@ static void handle_mouse_event(int x, int y, uint32_t buttons) {
     
     if (mouse_buttons & 1) {
         if (resizing_window) {
+             // Mark old bounds dirty
+             mark_dirty(resizing_window->x - 10, resizing_window->y - 10, resizing_window->width + 20, resizing_window->height + 20);
+
              int dx = mouse_x - last_mouse_x;
              int dy = mouse_y - last_mouse_y;
              
@@ -418,17 +459,23 @@ static void handle_mouse_event(int x, int y, uint32_t buttons) {
              
              if (resizing_window->width < 100) resizing_window->width = 100;
              if (resizing_window->height < 100) resizing_window->height = 100;
-             dirty = 1;
+             
+             // Mark new bounds dirty
+             mark_dirty(resizing_window->x - 10, resizing_window->y - 10, resizing_window->width + 20, resizing_window->height + 20);
         } else if (drag_window) {
+            // Mark old bounds dirty
+            mark_dirty(drag_window->x - 10, drag_window->y - 10, drag_window->width + 20, drag_window->height + 20);
+
             drag_window->x = mouse_x - drag_off_x;
             drag_window->y = mouse_y - drag_off_y;
-            dirty = 1;
+
+            // Mark new bounds dirty
+            mark_dirty(drag_window->x - 10, drag_window->y - 10, drag_window->width + 20, drag_window->height + 20);
         }
     }
 
 update_state:
     last_mouse_buttons = mouse_buttons;
-    if (mouse_x != last_mouse_x || mouse_y != last_mouse_y) dirty = 1;
     last_mouse_x = mouse_x;
     last_mouse_y = mouse_y;
 }
@@ -582,7 +629,7 @@ static comp_window_t *create_window(const char *title, int x, int y, int w, int 
         win->next = NULL;
     }
     
-    dirty = 1;
+    mark_dirty(x, y, w, h);
     return win;
 }
 
@@ -640,12 +687,14 @@ static void draw_window(comp_window_t *win) {
 void _start(void) {
     // 1. Get Framebuffer
     // Retry loop to handle race condition where capabilities aren't granted yet
-    int retries = 10;
+    // Increase retries significantly to ensure Service Manager has time to grant caps
+    int retries = 1000;
     while (retries--) {
         if (syscall1(SYS_GET_FRAMEBUFFER, (uint64_t)&fb_info) == 0) {
             break;
         }
-        syscall3(SYS_YIELD, 0, 0, 0); // Wait for Service Manager
+        syscall3(SYS_YIELD, 0, 0, 0); // Yield to let Service Manager run
+        for (volatile int i = 0; i < 100000; i++); // Small delay
     }
     
     if (retries < 0) {
@@ -703,6 +752,7 @@ void _start(void) {
             if (msg.size == sizeof(msg_create_window_t)) {
                 msg_create_window_t *req = (msg_create_window_t *)msg.data;
                 create_window(req->title, req->x, req->y, req->w, req->h, req->shmem_id, req->reply_port);
+                mark_dirty(req->x, req->y, req->w, req->h);
             }
             else if (msg.size == sizeof(msg_input_event_t)) {
                 // Input Event from Driver
@@ -714,14 +764,24 @@ void _start(void) {
                     handle_mouse_event(ievt->x, ievt->y, ievt->code);
                 }
             }
+            else if (msg.msg_id == 102) { // WINDOW_UPDATE
+                // Find window by port
+                for (comp_window_t *w = windows_list; w; w = w->next) {
+                    if (w->reply_port == msg.reply_port) {
+                        mark_dirty(w->x, w->y, w->width, w->height);
+                        break;
+                    }
+                }
+            }
             else if (msg.size == 0) {
                 // Force Redraw
-                dirty = 1;
+                mark_full_dirty();
             }
         }
         
         // Handle Kernel Input (Legacy/Fallback)
-        while (syscall1(SYS_GET_INPUT_EVENT, (uint64_t)&evt) == 1) {
+        int loop_count = 0;
+        while (syscall1(SYS_GET_INPUT_EVENT, (uint64_t)&evt) == 1 && loop_count++ < 10) {
             if (evt.type == 2) { // Mouse
                 handle_mouse_event(evt.x, evt.y, evt.code);
             } else if (evt.type == 1) { // Keyboard
@@ -734,34 +794,41 @@ void _start(void) {
         
         // Render if dirty
         if (dirty) {
-            // Background
-            for (uint64_t y = 0; y < fb_info.height; y++) {
-                // Gradient
+            // Background (Only redraw dirty area)
+            for (int y = global_dirty.y1; y < global_dirty.y2; y++) {
+                // Gradient (calculate based on full screen Y)
                 int r = 20 + (y * 15) / fb_info.height;
                 int g = 40 + (y * 30) / fb_info.height;
                 int b = 80 + (y * 40) / fb_info.height;
                 uint32_t color = RGB(r, g, b);
-                for (uint64_t x = 0; x < fb_info.width; x++) {
+                for (int x = global_dirty.x1; x < global_dirty.x2; x++) {
                     back_buffer[y * fb_info.width + x] = color;
                 }
             }
             
             // Windows
             for (comp_window_t *w = windows_list; w; w = w->next) {
+                // Optimization: Skip window if it doesn't intersect dirty rect
+                if (w->x + w->width < global_dirty.x1 || w->x > global_dirty.x2 ||
+                    w->y + w->height < global_dirty.y1 || w->y > global_dirty.y2) {
+                    continue;
+                }
                 draw_window(w);
             }
             
             // Cursor
             draw_cursor(mouse_x, mouse_y);
             
-            // Flip (Copy Back Buffer to Front Buffer)
+            // Flip (Copy Dirty Rect from Back Buffer to Front Buffer)
             if (back_buffer != fb_ptr) {
-                memcpy(fb_ptr, back_buffer, fb_info.width * fb_info.height * 4);
-            } else {
-                // Single buffering - nothing to flip
+                for (int y = global_dirty.y1; y < global_dirty.y2; y++) {
+                    int offset = y * fb_info.width + global_dirty.x1;
+                    int size_bytes = (global_dirty.x2 - global_dirty.x1) * 4;
+                    memcpy(&fb_ptr[offset], &back_buffer[offset], size_bytes);
+                }
             }
             
-            dirty = 0;
+            reset_dirty();
         }
         
         syscall3(SYS_YIELD, 0, 0, 0);

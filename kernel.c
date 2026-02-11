@@ -269,6 +269,11 @@ void _start(void) {
     fb_width = framebuffer->width;
     fb_height = framebuffer->height;
 
+    // Initialize Serial (for debug output)
+    serial_init();
+    klog_init(); // Initialize kernel log buffer (once)
+    kprintf("\n[KERNEL] GDT initialized.\n");
+
     // Initialize GDT
     gdt_init();
 

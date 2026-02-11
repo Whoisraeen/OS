@@ -134,9 +134,9 @@ bool security_has_capability(uint32_t pid, capability_t cap) {
         return true;
     }
     
-    // Service Manager (PID 1) also gets full privileges (or at least Admin)
+    // Service Manager (PID 1 or 2) also gets full privileges
     // This allows it to grant capabilities to other services
-    if (pid == 1) {
+    if (pid == 1 || pid == 2) {
         return true;
     }
 

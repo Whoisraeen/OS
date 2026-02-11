@@ -9,6 +9,7 @@
 #include "klog.h"    // For panic dump
 #include <stddef.h>
 #include <stdarg.h>
+#include <stdbool.h>
 
 struct idt_entry idt[256];
 struct idt_ptr idtp;
@@ -158,15 +159,17 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
         uint64_t faulting_addr;
         __asm__ volatile("mov %%cr2, %0" : "=r"(faulting_addr));
 
-        // Try demand paging / COW handling for user-mode faults
-        if (frame->cs & 3) {
+        // Try demand paging / COW handling for any fault targeting user addresses
+        // (Even if fault happened in kernel mode during a copy_from_user)
+        extern bool is_user_address(uint64_t addr, size_t size);
+        if (is_user_address(faulting_addr, 1)) {
             extern int vmm_handle_page_fault(uint64_t fault_addr, uint64_t error_code);
             if (vmm_handle_page_fault(faulting_addr, frame->err_code)) {
                 return (uint64_t)frame; // Handled — resume execution
             }
         }
 
-        // User-mode page fault: terminate the task
+        // If it wasn't handled (e.g. invalid user addr or kernel-space addr)
         if (frame->cs & 3) {
             console_set_enabled(1);
             kprintf("\n[PAGE FAULT] User task %u killed — Addr: 0x%lx, IP: 0x%lx, Err: 0x%lx\n",

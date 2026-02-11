@@ -17,11 +17,11 @@ void _start(void) {
     // Debug: Simple loop to verify we reached user mode
     // syscall3(SYS_WRITE, 1, (long)"[SM] ALIVE\n", 12);
     
-    const char *msg = "[SM] Service Manager (PID 1) v2 Started.\n";
-    syscall3(SYS_WRITE, 1, (long)msg, 41);
+    const char *msg = "[SM] Service Manager (PID 2) Started.\n";
+    syscall3(SYS_WRITE, 1, (long)msg, 38);
 
     // 1. Spawn Compositor (Critical GUI Service)
-    const char *comp_path = "compositor.elf";
+    const char *comp_path = "/compositor.elf";
     long comp_pid = syscall1(SYS_PROC_EXEC, (long)comp_path);
     
     if (comp_pid > 0) {
@@ -33,7 +33,7 @@ void _start(void) {
     }
     
     // 1b. Spawn Panel (Desktop UI)
-    const char *panel_path = "panel.elf";
+    const char *panel_path = "/panel.elf";
     long panel_pid = syscall1(SYS_PROC_EXEC, (long)panel_path);
     if (panel_pid > 0) {
          // Grant Capabilities: IPC Creation, Shared Memory, Reboot/Shutdown, Process Execution
@@ -42,7 +42,7 @@ void _start(void) {
     }
 
     // 2. Start Keyboard Driver
-    const char *kbd_path = "keyboard_driver.elf";
+    const char *kbd_path = "/keyboard_driver.elf";
     long kbd_pid = syscall1(SYS_PROC_EXEC, (long)kbd_path);
     if (kbd_pid > 0) {
          // CAP_HW_INPUT | CAP_IPC_CREATE
@@ -51,7 +51,7 @@ void _start(void) {
     }
 
     // 3. Start Mouse Driver
-    const char *mouse_path = "mouse_driver.elf";
+    const char *mouse_path = "/mouse_driver.elf";
     long mouse_pid = syscall1(SYS_PROC_EXEC, (long)mouse_path);
     if (mouse_pid > 0) {
          // CAP_HW_INPUT | CAP_IPC_CREATE
@@ -60,7 +60,7 @@ void _start(void) {
     }
     
     // 4. Start Terminal (Demo App)
-    const char *term_path = "terminal.elf";
+    const char *term_path = "/terminal.elf";
     long term_pid = syscall1(SYS_PROC_EXEC, (long)term_path);
     if (term_pid > 0) {
          // Grant Capabilities: IPC Creation, Shared Memory

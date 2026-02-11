@@ -1,5 +1,6 @@
 #include "sched.h"
 #include "pmm.h"
+#include "ipc.h"
 #include "serial.h"
 #include "console.h"
 #include "idt.h"
@@ -23,6 +24,8 @@ static spinlock_t tasks_alloc_lock = {0}; // Lock for allocating from 'tasks' ar
 static uint32_t num_tasks = 0;
 static bool scheduler_ready = false;
 static uint32_t next_cpu_rr = 0; // Round-robin CPU selector
+
+static void reap_child(task_t *child);
 
 // Helper: Enqueue task to CPU's run queue
 static void sched_enqueue(cpu_t *cpu, task_t *task) {
@@ -269,54 +272,39 @@ int task_create_user(const char *name, const void *elf_data, size_t size, uint32
     uint64_t user_stack_base = user_stack_top - USER_STACK_SIZE;
 
     uint64_t last_stack_phys = 0;
+    bool stack_ok = true;
     for (uint64_t addr = user_stack_base; addr < user_stack_top; addr += 4096) {
         uint64_t phys = (uint64_t)pmm_alloc_page();
         if (!phys) {
             kprintf("[SCHED] OOM allocating stack for task %d\n", slot);
-            // TODO: Cleanup previous pages?
-            // Switch back CR3 and fail
-            __asm__ volatile("mov %0, %%cr3" : : "r"(old_cr3) : "memory");
-            spinlock_acquire(&tasks_alloc_lock);
-            task->state = TASK_UNUSED;
-            num_tasks--;
-            spinlock_release(&tasks_alloc_lock);
-            return -1;
+            stack_ok = false;
+            break;
         }
         if (addr + 4096 >= user_stack_top) last_stack_phys = phys;
         vmm_map_user_page(addr, phys); // Uses current CR3 = user PML4
     }
     
-    // Initialize Stack (argc=0, argv=NULL, envp=NULL)
-    // We need to write 3 uint64_t zeros at the top of the stack
-    if (last_stack_phys) {
-        uint64_t *stack_page = (uint64_t *)(last_stack_phys + vmm_get_hhdm_offset());
-        // Stack grows down. Top is at offset 4096.
-        // We push 3 values:
-        // [4088] = 0 (envp terminator?)
-        // [4080] = 0 (argv terminator?)
-        // [4072] = 0 (argc)
-        // RSP points to 4072.
-        
-        // Actually crt0 does: pop rax (argc).
-        // So rsp must point to argc.
-        
-        stack_page[511] = 0; // envp
-        stack_page[510] = 0; // argv
-        stack_page[509] = 0; // argc
-        
-        // Adjust RSP
-        user_stack_top -= 24; 
+    if (stack_ok) {
+        // Initialize Stack (argc=0, argv=NULL, envp=NULL)
+        if (last_stack_phys) {
+            uint64_t *stack_page = (uint64_t *)(last_stack_phys + vmm_get_hhdm_offset());
+            stack_page[511] = 0; // envp
+            stack_page[510] = 0; // argv
+            stack_page[509] = 0; // argc
+            
+            // Adjust RSP
+            user_stack_top -= 24; 
+        }
     }
 
     // Restore CR3
     __asm__ volatile("mov %0, %%cr3" : : "r"(old_cr3) : "memory");
 
-    if (entry_point == 0) {
-        kprintf("[SCHED] Failed to load ELF for task %d\n", slot);
-        spinlock_acquire(&tasks_alloc_lock);
-        task->state = TASK_UNUSED;
-        num_tasks--;
-        spinlock_release(&tasks_alloc_lock);
+    if (!stack_ok || entry_point == 0) {
+        if (!stack_ok) kprintf("[SCHED] Failed to allocate stack for task %d\n", slot);
+        else kprintf("[SCHED] Failed to load ELF for task %d\n", slot);
+
+        reap_child(task);
         return -1;
     }
 
@@ -643,9 +631,6 @@ void task_yield(void) {
     __asm__ volatile("int $0x40");
 }
 
-// Forward declaration
-static void reap_child(task_t *child);
-
 // Thread stack region (each thread gets USER_STACK_SIZE with 4KB guard)
 #define THREAD_STACK_REGION 0x7FFFFF000000ULL
 
@@ -689,9 +674,36 @@ int task_create_thread(uint64_t entry, uint64_t arg, uint64_t user_stack) {
     if (user_stack == 0) {
         uint64_t thread_stack_top = THREAD_STACK_REGION - (uint64_t)slot * (USER_STACK_SIZE + 4096);
         uint64_t thread_stack_base = thread_stack_top - USER_STACK_SIZE;
+        bool thread_stack_ok = true;
         for (uint64_t addr = thread_stack_base; addr < thread_stack_top; addr += 4096) {
             uint64_t phys = (uint64_t)pmm_alloc_page();
+            if (!phys) {
+                // Cleanup partial user stack
+                for (uint64_t cleanup_addr = thread_stack_base; cleanup_addr < addr; cleanup_addr += 4096) {
+                    uint64_t pte = vmm_get_pte(cleanup_addr);
+                    if (pte & PTE_PRESENT) {
+                        pmm_free_page((void *)(pte & PTE_ADDR_MASK));
+                        vmm_unmap_page(cleanup_addr);
+                    }
+                }
+                thread_stack_ok = false;
+                break;
+            }
             vmm_map_user_page(addr, phys);
+        }
+        if (!thread_stack_ok) {
+            // Cleanup kernel stack
+            if (tasks[slot].stack_base) {
+                uint64_t hhdm = pmm_get_hhdm_offset();
+                uint64_t phys = (uint64_t)tasks[slot].stack_base - hhdm;
+                pmm_free_pages((void *)phys, (TASK_STACK_SIZE + 4095) / 4096);
+                tasks[slot].stack_base = NULL;
+            }
+            spinlock_acquire(&tasks_alloc_lock);
+            tasks[slot].state = TASK_UNUSED;
+            num_tasks--;
+            spinlock_release(&tasks_alloc_lock);
+            return -1;
         }
         user_stack = thread_stack_top;
     }
@@ -861,9 +873,11 @@ int task_fork(registers_t *parent_regs) {
     // Clone fd table
     if (parent->fd_table) {
         tasks[slot].fd_table = fd_table_create();
-        if (tasks[slot].fd_table) {
-            memcpy(tasks[slot].fd_table, parent->fd_table, sizeof(struct fd_table));
+        if (!tasks[slot].fd_table) {
+            reap_child(&tasks[slot]);
+            return -1;
         }
+        memcpy(tasks[slot].fd_table, parent->fd_table, sizeof(struct fd_table));
     } else {
         tasks[slot].fd_table = NULL;
     }
@@ -871,6 +885,10 @@ int task_fork(registers_t *parent_regs) {
     // Clone mm_struct
     if (parent->mm) {
         tasks[slot].mm = mm_clone(parent->mm);
+        if (!tasks[slot].mm) {
+            reap_child(&tasks[slot]);
+            return -1;
+        }
     } else {
         tasks[slot].mm = NULL;
     }
@@ -898,6 +916,9 @@ int task_fork(registers_t *parent_regs) {
 
 // Helper: reap a terminated child (free its resources, mark UNUSED)
 static void reap_child(task_t *child) {
+    // Cleanup IPC resources
+    ipc_cleanup_process(child->id);
+
     if (child->fd_table) {
         fd_table_destroy(child->fd_table);
         child->fd_table = NULL;

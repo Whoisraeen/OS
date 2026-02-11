@@ -201,6 +201,7 @@ void *pmm_alloc_pages(size_t count) {
             if (found == count) {
                 for (uint64_t j = 0; j < count; j++) {
                     bitmap_set(start + j);
+                    if (refcounts) refcounts[start + j] = 1;
                 }
                 first_free_hint = start + count;
                 return (void *)(start * PAGE_SIZE);
@@ -219,6 +220,7 @@ void *pmm_alloc_pages(size_t count) {
             if (found == count) {
                 for (uint64_t j = 0; j < count; j++) {
                     bitmap_set(start + j);
+                    if (refcounts) refcounts[start + j] = 1;
                 }
                 first_free_hint = start + count;
                 return (void *)(start * PAGE_SIZE);

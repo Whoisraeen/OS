@@ -307,22 +307,6 @@ static void terminal_puts(const char *s) {
     while (*s) terminal_putc(*s++);
 }
 
-static void terminal_put_hex(uint32_t val) {
-    char buf[16];
-    char *p = buf + 15;
-    *p = 0;
-    if (val == 0) {
-        terminal_puts("0");
-        return;
-    }
-    while (val) {
-        int d = val % 16;
-        *--p = (d < 10) ? ('0' + d) : ('A' + d - 10);
-        val /= 16;
-    }
-    terminal_puts(p);
-}
-
 // ============================================================================
 // Command Handling
 // ============================================================================

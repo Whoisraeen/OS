@@ -96,6 +96,7 @@ typedef struct {
 // Regular user application
 #define CAPSET_USER      (CAP_FILE_READ | CAP_FILE_EXECUTE | \
                           CAP_IPC_SEND | CAP_IPC_RECV | \
+                          CAP_IPC_CREATE | CAP_IPC_SHMEM | \
                           CAP_PROC_FORK | CAP_PROC_EXEC)
 
 // Sandboxed application (minimal privileges)

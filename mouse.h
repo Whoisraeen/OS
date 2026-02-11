@@ -21,4 +21,6 @@ uint8_t mouse_get_buttons(void);
 // Mouse handler (called from IRQ12)
 void mouse_handler(void);
 
+int get_mouse_event(uint32_t *type, uint32_t *buttons, int32_t *x, int32_t *y);
+
 #endif

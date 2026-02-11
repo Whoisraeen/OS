@@ -178,6 +178,7 @@ static void port_configure(int port_no) {
     kprintf("[AHCI] Port %d: Allocating memory...\n", port_no);
     // Allocate Command List (1KB aligned)
     // We allocate a full page (4KB) to be safe and simple
+    // Allocate Command List (1KB aligned, one page is enough)
     uint64_t cl_phys = (uint64_t)pmm_alloc_page();
     if (cl_phys == 0) {
         kprintf("[AHCI] PMM Alloc failed\n");
@@ -189,26 +190,26 @@ static void port_configure(int port_no) {
     port->clb = (uint32_t)cl_phys;
     port->clbu = (uint32_t)(cl_phys >> 32);
 
-    // Allocate FIS (256B aligned)
-    uint64_t fb_phys = cl_phys + 1024;
+    // Allocate FIS (256B aligned) - Use a separate page to avoid overlap
+    uint64_t fb_phys = (uint64_t)pmm_alloc_page();
     port->fb = (uint32_t)fb_phys;
     port->fbu = (uint32_t)(fb_phys >> 32);
+    memset(p2v(fb_phys), 0, 4096);
 
-    // Setup Command Header (Slot 0)
+    // Command Table Allocation (32 * 144 bytes = 4608 bytes -> 2 pages)
+    uint64_t ct_phys_base = (uint64_t)pmm_alloc_pages(2);
+    cmd_table_virt[port_no] = (ahci_cmd_table_t *)p2v(ct_phys_base);
+    memset(cmd_table_virt[port_no], 0, 8192);
+
+    // Setup All Command Headers
     cmd_header_virt[port_no] = (ahci_cmd_header_t *)cl_virt;
-    ahci_cmd_header_t *hdr = &cmd_header_virt[port_no][0];
-    
-    hdr->cfl = sizeof(fis_reg_h2d_t) / 4; // 5 DWORDS
-    hdr->w = 0;
-    hdr->prdtl = 1; // 1 PRDT entry
-    
-    // Command Table
-    uint64_t ct_phys = cl_phys + 1024 + 256;
-    hdr->ctba = (uint32_t)ct_phys;
-    hdr->ctbau = (uint32_t)(ct_phys >> 32);
-
-    cmd_table_virt[port_no] = (ahci_cmd_table_t *)p2v(ct_phys);
-    memset(cmd_table_virt[port_no], 0, sizeof(ahci_cmd_table_t));
+    for (int i = 0; i < 32; i++) {
+        ahci_cmd_header_t *hdr = &cmd_header_virt[port_no][i];
+        uint64_t ct_phys = ct_phys_base + (i * sizeof(ahci_cmd_table_t));
+        hdr->ctba = (uint32_t)ct_phys;
+        hdr->ctbau = (uint32_t)(ct_phys >> 32);
+        hdr->cfl = 5; // 5 DWORDS
+    }
 
     // Initialize semaphore for this port (count=0, ISR will post)
     sem_init(&port_sem[port_no], 0);
@@ -236,79 +237,76 @@ static void port_configure(int port_no) {
 }
 
 void ahci_init(void) {
-    kprintf("[AHCI] Searching for controller...\n");
-    pci_device_t *dev = pci_find_device_by_class(0x01, 0x06); // SATA
-    if (!dev) {
-        kprintf("[AHCI] No SATA controller found.\n");
-        return;
-    }
-
-    kprintf("[AHCI] Found controller at %02x:%02x.%d\n", dev->bus, dev->slot, dev->func);
-
-    // Enable Bus Master and Memory
-    pci_enable_bus_master(dev);
-    pci_enable_memory(dev);
-
-    // Get ABAR (BAR5)
-    uint32_t bar5_size = 0;
-    uint64_t bar5_phys = pci_get_bar_address(dev, 5, &bar5_size);
-    if (bar5_phys == 0) {
-        kprintf("[AHCI] Invalid BAR5.\n");
-        return;
-    }
-
-    // Map ABAR
-    abar = (ahci_hba_mem_t *)p2v(bar5_phys);
+    kprintf("[AHCI] Searching for controllers...\n");
     
-    // Perform HBA Reset
-    kprintf("[AHCI] Resetting HBA...\n");
-    abar->ghc |= AHCI_GHC_HR;
-    int limit = 1000000;
-    while ((abar->ghc & AHCI_GHC_HR) && limit > 0) {
-        limit--;
-    }
-    if (limit == 0) {
-        kprintf("[AHCI] Warning: HBA Reset timed out\n");
-    }
+    for (int idx = 0; ; idx++) {
+        pci_device_t *dev = pci_get_device(idx);
+        if (!dev) break;
 
-    // Enable AHCI mode
-    abar->ghc |= AHCI_GHC_AE;
-    
-    // Enable MSI (Vector 46)
-    if (0 && pci_enable_msi(dev, 46, 0) == 0) {
-        kprintf("[AHCI] MSI Enabled (Vector 46)\n");
-    } else {
-        kprintf("[AHCI] Warning: MSI Enable Failed, falling back to polling/Legacy IRQ\n");
-    }
+        // Check for AHCI controller (Class 01, Subclass 06)
+        if (dev->class_code != 0x01 || dev->subclass != 0x06) continue;
 
-    // Enable Global Interrupts in GHC
-    abar->ghc |= AHCI_GHC_IE;
+        kprintf("[AHCI] Found controller at %02x:%02x.%d\n", dev->bus, dev->slot, dev->func);
 
-    kprintf("[AHCI] ABAR mapped at 0x%lx (phys 0x%lx)\n", (uint64_t)abar, bar5_phys);
-    kprintf("[AHCI] Cap: 0x%x, PI: 0x%x, Ver: 0x%x\n", abar->cap, abar->pi, abar->vs);
+        // Enable Bus Master and Memory
+        pci_enable_bus_master(dev);
+        pci_enable_memory(dev);
 
-    // Find valid port
-    uint32_t pi = abar->pi;
-    for (int i = 0; i < 32; i++) {
-        if (pi & 1) {
-            int type = check_type(&abar->ports[i]);
-            if (type == 1) { // SATA
-                kprintf("[AHCI] Port %d is SATA. Configuring...\n", i);
-                port_configure(i);
-                active_port = i;
-                // For now, we only support one drive
-                break;
-            } else if (type == 2) {
-                kprintf("[AHCI] Port %d is SATAPI (CD-ROM). Ignored.\n", i);
-            }
+        // Get ABAR (BAR5)
+        uint32_t bar5_size = 0;
+        uint64_t bar5_phys = pci_get_bar_address(dev, 5, &bar5_size);
+        if (bar5_phys == 0) {
+            kprintf("[AHCI] Invalid BAR5.\n");
+            continue;
         }
-        pi >>= 1;
+
+        // Map ABAR
+        abar = (ahci_hba_mem_t *)p2v(bar5_phys);
+        
+        // Perform HBA Reset
+        kprintf("[AHCI] Resetting HBA...\n");
+        abar->ghc |= AHCI_GHC_HR;
+        int limit = 1000000;
+        while ((abar->ghc & AHCI_GHC_HR) && limit > 0) {
+            limit--;
+        }
+
+        // Enable AHCI mode
+        abar->ghc |= AHCI_GHC_AE;
+        
+        // Enable MSI (Vector 46)
+        if (pci_enable_msi(dev, 46, 0) == 0) {
+            kprintf("[AHCI] MSI Enabled (Vector 46)\n");
+        }
+
+        // Enable Global Interrupts in GHC
+        abar->ghc |= AHCI_GHC_IE;
+
+        // Find valid port
+        uint32_t pi = abar->pi;
+        for (int i = 0; i < 32; i++) {
+            if (pi & 1) {
+                int type = check_type(&abar->ports[i]);
+                if (type == 1) { // SATA
+                    kprintf("[AHCI] Port %d is SATA. Configuring...\n", i);
+                    port_configure(i);
+                    active_port = i;
+                    break;
+                }
+            }
+            pi >>= 1;
+        }
+
+        if (active_port != -1) {
+            kprintf("[AHCI] Initialized. Active Port: %d\n", active_port);
+            return;
+        }
+        
+        kprintf("[AHCI] No SATA drive on this controller, continuing search...\n");
     }
 
     if (active_port == -1) {
-        kprintf("[AHCI] No active SATA drive found.\n");
-    } else {
-        kprintf("[AHCI] Initialized. Active Port: %d\n", active_port);
+        kprintf("[AHCI] No active SATA drive found on any controller.\n");
     }
 }
 
@@ -330,15 +328,22 @@ int ahci_read(uint64_t lba, uint32_t count, uint8_t *buffer) {
     // Clear interrupts
     port->is = 0xFFFFFFFF;
 
-    int slot = 0; // We forced slot 0 in config, but let's stick to it for simplicity
+    int slot = find_cmd_slot(port);
+    if (slot == -1) return -1;
     
     ahci_cmd_header_t *hdr = &cmd_header_virt[active_port][slot];
     ahci_cmd_table_t *tbl = cmd_table_virt[active_port];
 
     // Setup Header
+    memset(hdr, 0, sizeof(ahci_cmd_header_t));
     hdr->cfl = sizeof(fis_reg_h2d_t) / 4;
     hdr->w = 0; // Read
-    hdr->prdtl = 1; // 1 entry for now (assuming buffer is contiguous physically)
+    hdr->prdtl = 1; // 1 entry for now
+
+    // Set Command Table Base Address (Physical)
+    uint64_t ct_phys = (uintptr_t)tbl - vmm_get_hhdm_offset();
+    hdr->ctba = (uint32_t)ct_phys;
+    hdr->ctbau = (uint32_t)(ct_phys >> 32);
 
     // Setup FIS
     fis_reg_h2d_t *fis = (fis_reg_h2d_t *)tbl->cfis;
@@ -421,13 +426,21 @@ int ahci_write(uint64_t lba, uint32_t count, const uint8_t *buffer) {
     ahci_port_regs_t *port = &abar->ports[active_port];
     port->is = 0xFFFFFFFF;
 
-    int slot = 0;
+    int slot = find_cmd_slot(port);
+    if (slot == -1) return -1;
+
     ahci_cmd_header_t *hdr = &cmd_header_virt[active_port][slot];
     ahci_cmd_table_t *tbl = cmd_table_virt[active_port];
 
+    memset(hdr, 0, sizeof(ahci_cmd_header_t));
     hdr->cfl = sizeof(fis_reg_h2d_t) / 4;
     hdr->w = 1; // Write
     hdr->prdtl = 1;
+
+    // Set Command Table Base Address (Physical)
+    uint64_t ct_phys = (uintptr_t)tbl - vmm_get_hhdm_offset();
+    hdr->ctba = (uint32_t)ct_phys;
+    hdr->ctbau = (uint32_t)(ct_phys >> 32);
 
     fis_reg_h2d_t *fis = (fis_reg_h2d_t *)tbl->cfis;
     memset(fis, 0, sizeof(fis_reg_h2d_t));

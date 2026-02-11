@@ -2,6 +2,7 @@
 #include "mouse.h"
 #include "font.h"
 #include "serial.h"
+#include "rtc.h"
 
 // Framebuffer access
 extern uint32_t *fb_ptr;
@@ -13,6 +14,9 @@ static uint32_t *back_buffer = NULL;
 
 // Windows
 static window_t windows[MAX_WINDOWS];
+
+// Window order (Z-order), index 0 = bottom, MAX_WINDOWS-1 = top
+static int window_order[MAX_WINDOWS];
 
 // Text lines for each window (simple storage)
 #define MAX_TEXT_LINES 10
@@ -165,6 +169,32 @@ static void draw_window(int id) {
     draw_window_content(id);
 }
 
+// Helper to move window to top of Z-order
+static void focus_window(int id) {
+    int idx = -1;
+    for (int i = 0; i < MAX_WINDOWS; i++) {
+        if (window_order[i] == id) {
+            idx = i;
+            break;
+        }
+    }
+    
+    if (idx == -1) return;
+    
+    // Shift others down
+    for (int i = idx; i < MAX_WINDOWS - 1; i++) {
+        window_order[i] = window_order[i + 1];
+    }
+    
+    // Put this one at top
+    window_order[MAX_WINDOWS - 1] = id;
+    
+    // Update focused flag
+    for (int i = 0; i < MAX_WINDOWS; i++) {
+        windows[i].focused = (i == id);
+    }
+}
+
 void desktop_init(void) {
     // Allocate back buffer
     extern void *kmalloc(size_t size);
@@ -181,6 +211,8 @@ void desktop_init(void) {
         for (int j = 0; j < MAX_TEXT_LINES; j++) {
             window_text[i][j].used = 0;
         }
+        // Initialize window order
+        window_order[i] = i;
     }
     
     kprintf("[DESKTOP] Desktop initialized (%lux%lu)\n", fb_width, fb_height);
@@ -195,6 +227,11 @@ void desktop_render(void) {
     int my = mouse_get_y();
     uint8_t buttons = mouse_get_buttons();
     
+    // Get time
+    rtc_time_t t;
+    rtc_get_time(&t);
+    static int last_min = -1;
+    
     // Handle mouse input
     int left_pressed = (buttons & MOUSE_LEFT) && !(last_buttons & MOUSE_LEFT);
     int left_released = !(buttons & MOUSE_LEFT) && (last_buttons & MOUSE_LEFT);
@@ -204,24 +241,23 @@ void desktop_render(void) {
     if (left_pressed && dragging_window == -1) {
         // Check windows in reverse order (top window first)
         for (int i = MAX_WINDOWS - 1; i >= 0; i--) {
-            if (!windows[i].active) continue;
+            int id = window_order[i];
+            if (!windows[id].active) continue;
             
-            int wx = windows[i].x;
-            int wy = windows[i].y;
-            int ww = windows[i].width;
+            int wx = windows[id].x;
+            int wy = windows[id].y;
+            int ww = windows[id].width;
             
             // Check if click is in title bar (20 pixels high)
             if (mx >= wx && mx < wx + ww && my >= wy && my < wy + 20) {
                 // Check if NOT on close button
                 if (mx < wx + ww - 18) {
-                    dragging_window = i;
+                    dragging_window = id;
                     drag_offset_x = mx - wx;
                     drag_offset_y = my - wy;
                     
                     // Focus this window
-                    for (int k = 0; k < MAX_WINDOWS; k++) {
-                        windows[k].focused = (k == i);
-                    }
+                    focus_window(id);
                 }
                 break;
             }
@@ -300,12 +336,13 @@ void desktop_render(void) {
     // Update last state
     last_buttons = buttons;
     
-    // Only redraw if mouse moved or button changed
-    if (last_mx == mx && last_my == my && last_buttons == buttons && last_mx != -1) {
+    // Only redraw if mouse moved or button changed or time changed
+    if (last_mx == mx && last_my == my && last_buttons == buttons && last_mx != -1 && last_min == t.minutes) {
         return;  // No change, skip redraw
     }
     last_mx = mx;
     last_my = my;
+    last_min = t.minutes;
     
     // Clear to desktop color
     for (size_t i = 0; i < fb_width * fb_height; i++) {
@@ -322,7 +359,27 @@ void desktop_render(void) {
     draw_string(8, fb_height - 24, "RaeenOS", 0xFF00AAFF);
     
     // Draw time/status on right side of taskbar
-    draw_string(fb_width - 80, fb_height - 24, "10:15 AM", 0xFFCCCCCC);
+    char time_str[32];
+    int h = t.hours;
+    const char *suffix = "AM";
+    if (h >= 12) {
+        suffix = "PM";
+        if (h > 12) h -= 12;
+    }
+    if (h == 0) h = 12;
+    
+    int pos = 0;
+    if (h >= 10) time_str[pos++] = '1';
+    time_str[pos++] = '0' + (h % 10);
+    time_str[pos++] = ':';
+    time_str[pos++] = '0' + (t.minutes / 10);
+    time_str[pos++] = '0' + (t.minutes % 10);
+    time_str[pos++] = ' ';
+    time_str[pos++] = suffix[0];
+    time_str[pos++] = suffix[1];
+    time_str[pos++] = '\0';
+    
+    draw_string(fb_width - 80, fb_height - 24, time_str, 0xFFCCCCCC);
     
     // Draw start menu if open
     if (start_menu_open) {
@@ -345,7 +402,7 @@ void desktop_render(void) {
     
     // Draw windows (in order, so later windows are on top)
     for (int i = 0; i < MAX_WINDOWS; i++) {
-        draw_window(i);
+        draw_window(window_order[i]);
     }
     
     // Draw mouse cursor (always on top)
@@ -387,6 +444,8 @@ int window_create(const char *title, int x, int y, int width, int height) {
             for (int k = 0; k < MAX_WINDOWS; k++) {
                 if (k != i) windows[k].focused = 0;
             }
+            
+            focus_window(i);
             
             kprintf("[DESKTOP] Created window %d: %s\n", i, title);
             return i;

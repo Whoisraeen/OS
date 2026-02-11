@@ -351,8 +351,18 @@ uint64_t vmm_get_pte(uint64_t virt) {
     return pt[idx1];
 }
 
+static int vmm_handle_page_fault_internal(uint64_t fault_addr, uint64_t error_code);
+
 // Handle a page fault. Returns 1 if handled, 0 if unrecoverable.
 int vmm_handle_page_fault(uint64_t fault_addr, uint64_t error_code) {
+    // Only attempt to handle faults for addresses in the user-space range
+    if (is_user_address(fault_addr, 1)) {
+        return vmm_handle_page_fault_internal(fault_addr, error_code);
+    }
+    return 0;
+}
+
+static int vmm_handle_page_fault_internal(uint64_t fault_addr, uint64_t error_code) {
     // Get current task
     task_t *task = task_get_by_id(task_current_id());
     if (!task || !task->mm) return 0;

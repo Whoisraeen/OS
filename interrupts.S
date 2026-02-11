@@ -84,12 +84,13 @@ jump_to_usermode:
 ; -----------------------------------------------------------------------------
 ; cpu_t layout (must match cpu.h):
 ;   offset 0:  self              (8 bytes) — get_cpu() reads this
-;   offset 8:  syscall_scratch   (8 bytes) — user RSP saved here
-;   offset 16: lapic_id          (4 bytes)
-;   offset 20: cpu_id            (4 bytes)
-;   offset 24: gdt[7]            (56 bytes)
-;   offset 80: tss               (104 bytes, packed)
-;   offset 84: tss.rsp0          (8 bytes) — kernel stack pointer
+;   offset 8:  startup_stack_top (8 bytes)
+;   offset 16: syscall_scratch   (8 bytes) — user RSP saved here
+;   offset 24: lapic_id          (4 bytes)
+;   offset 28: cpu_id            (4 bytes)
+;   offset 32: gdt[7]            (56 bytes)
+;   offset 88: tss               (104 bytes, packed)
+;   offset 92: tss.rsp0          (8 bytes) — kernel stack pointer
 ; -----------------------------------------------------------------------------
 section .text
 
@@ -133,13 +134,13 @@ syscall_entry:
     push rax
 
     ; Switch to Kernel Segments
-    mov ax, 0x10
+    mov rdi, [rsp + 136] ; Load original RAX (syscall num) from stack
+    mov ax, 0x10         ; Kernel Data Segment
     mov ds, ax
     mov es, ax
     mov fs, ax
 
     ; Call C handler: syscall_handler(num, regs)
-    mov rdi, rax    ; 1st arg: num
     mov rsi, rsp    ; 2nd arg: regs
     call syscall_handler
 

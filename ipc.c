@@ -198,6 +198,7 @@ ipc_port_t ipc_port_lookup(const char *name) {
 
 int ipc_send_message(ipc_port_t dest_port, ipc_message_t *msg,
                      uint32_t sender_pid, uint32_t flags, uint32_t timeout_ms) {
+    (void)flags; (void)timeout_ms;
     // Validate port
     if (!ipc_port_valid(dest_port, sender_pid)) {
         return IPC_ERR_INVALID_PORT;
@@ -228,9 +229,9 @@ int ipc_send_message(ipc_port_t dest_port, ipc_message_t *msg,
     // If a process is waiting on this port, wake it up
     if (port->waiting_pid != 0) {
         task_t *waiter = task_get_by_id(port->waiting_pid);
-        port->waiting_pid = 0;
         if (waiter && waiter->state == TASK_BLOCKED) {
             task_unblock(waiter);
+            port->waiting_pid = 0; // Clear only if we actually unblocked someone
         }
     }
 
@@ -242,6 +243,7 @@ int ipc_send_message(ipc_port_t dest_port, ipc_message_t *msg,
 
 int ipc_recv_message(ipc_port_t port, ipc_message_t *msg,
                      uint32_t receiver_pid, uint32_t flags, uint32_t timeout_ms) {
+    (void)timeout_ms;
     // Validate port
     if (!ipc_port_valid(port, receiver_pid)) {
         return IPC_ERR_INVALID_PORT;
@@ -301,28 +303,21 @@ uint32_t ipc_shmem_create(size_t size, uint32_t owner_pid, uint32_t flags) {
     for (uint32_t i = 1; i < 64; i++) {
         if (!ipc_shmem_regions[i].active) {
             // Allocate physical pages
-            uint64_t phys_addr = (uint64_t)pmm_alloc_page();
-            if (phys_addr == 0) {
+            void *phys_addr = pmm_alloc_pages(pages_needed);
+            if (phys_addr == NULL) {
                 return 0;  // Out of memory
             }
 
-            // For multi-page regions, we'd need to allocate multiple pages
-            // For now, limit to single page
-            if (pages_needed > 1) {
-                kprintf("[IPC] Warning: Multi-page shmem not fully implemented, using 1 page\n");
-                size = 4096;
-            }
-
             ipc_shmem_regions[i].active = true;
-            ipc_shmem_regions[i].phys_addr = phys_addr;
+            ipc_shmem_regions[i].phys_addr = (uint64_t)phys_addr;
             ipc_shmem_regions[i].size = size;
             ipc_shmem_regions[i].owner_pid = owner_pid;
             ipc_shmem_regions[i].flags = flags;
             ipc_shmem_regions[i].ref_count = 0;
             ipc_shmem_regions[i].num_mapped = 0;
 
-            kprintf("[IPC] Shared memory %d created: size=%lu, owner=%d, phys=0x%lx\n",
-                    i, size, owner_pid, phys_addr);
+            kprintf("[IPC] Shared memory %d created: size=%lu (%lu pages), owner=%d, phys=0x%lx\n",
+                    i, size, pages_needed, owner_pid, (uint64_t)phys_addr);
             return i;
         }
     }
@@ -338,12 +333,14 @@ void *ipc_shmem_map(uint32_t shmem_id, uint32_t pid) {
 
     ipc_shmem_internal_t *shmem = &ipc_shmem_regions[shmem_id];
 
-    // Choose a virtual address in user space (for now, simple mapping)
-    // In full implementation, use process-specific address space
-    uint64_t virt_addr = 0x10000000 + (shmem_id * 0x100000);  // 1MB apart
+    // Choose a virtual address in user space
+    uint64_t virt_addr = 0x10000000 + (shmem_id * 0x1000000); // 16MB apart to allow large regions
 
-    // Map the physical page to virtual address
-    vmm_map_user_page(virt_addr, shmem->phys_addr);
+    // Map all pages of the region
+    size_t num_pages = shmem->size / 4096;
+    for (size_t p = 0; p < num_pages; p++) {
+        vmm_map_user_page(virt_addr + (p * 4096), shmem->phys_addr + (p * 4096));
+    }
 
     // Track mapping
     if (shmem->num_mapped < 16) {
@@ -351,8 +348,8 @@ void *ipc_shmem_map(uint32_t shmem_id, uint32_t pid) {
     }
     shmem->ref_count++;
 
-    kprintf("[IPC] Shared memory %d mapped to PID %d at virt 0x%lx\n",
-            shmem_id, pid, virt_addr);
+    kprintf("[IPC] Shared memory %d mapped to PID %d at virt 0x%lx (%lu pages)\n",
+            shmem_id, pid, virt_addr, num_pages);
 
     return (void *)virt_addr;
 }
@@ -402,13 +399,31 @@ int ipc_shmem_destroy(uint32_t shmem_id, uint32_t pid) {
     }
 
     // Free physical memory
-    pmm_free_page((void *)shmem->phys_addr);
+    pmm_free_pages((void *)shmem->phys_addr, shmem->size / 4096);
 
     shmem->active = false;
     shmem->ref_count = 0;
 
     kprintf("[IPC] Shared memory %d destroyed\n", shmem_id);
     return IPC_SUCCESS;
+}
+
+void ipc_cleanup_process(uint32_t pid) {
+    if (pid == 0) return;
+
+    // Cleanup ports
+    for (uint32_t i = 1; i < IPC_MAX_PORTS; i++) {
+        if (ipc_ports[i].active && ipc_ports[i].owner_pid == pid) {
+            ipc_port_destroy(i, pid);
+        }
+    }
+
+    // Cleanup shmem
+    for (uint32_t i = 1; i < 64; i++) {
+        if (ipc_shmem_regions[i].active && ipc_shmem_regions[i].owner_pid == pid) {
+            ipc_shmem_destroy(i, pid);
+        }
+    }
 }
 
 // ========================================================================

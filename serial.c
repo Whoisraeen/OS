@@ -7,6 +7,7 @@
 #define COM1_PORT 0x3F8
 
 static spinlock_t serial_lock;
+static int serial_present = 0;
 
 // Check if transmit buffer is empty
 static int serial_is_transmit_empty(void) {
@@ -45,15 +46,18 @@ void serial_init(void) {
     // Check if we received the same byte
     if (inb(COM1_PORT + 0) != 0xAE) {
         // Serial port is faulty (or doesn't exist in emulator)
+        serial_present = 0;
         return;
     }
     
     // Set normal operation mode (not loopback, IRQs enabled, OUT#1 and OUT#2 bits enabled)
     outb(COM1_PORT + 4, 0x0F);
+    serial_present = 1;
 }
 
 void serial_putc(char c) {
     klog_putc(c); // Capture to ring buffer
+    if (!serial_present) return;
     while (!serial_is_transmit_empty());
     outb(COM1_PORT, c);
 }

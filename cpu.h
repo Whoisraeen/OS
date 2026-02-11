@@ -65,6 +65,8 @@ _Static_assert(__builtin_offsetof(cpu_t, startup_stack_top) == 8,
     "cpu_t.startup_stack_top must be at offset 8 for smp_ap_trampoline");
 _Static_assert(__builtin_offsetof(cpu_t, syscall_scratch) == 16,
     "cpu_t.syscall_scratch must be at offset 16 for syscall_entry");
+_Static_assert(__builtin_offsetof(cpu_t, tss.rsp0) == 92,
+    "cpu_t.tss.rsp0 must be at offset 92 for syscall_entry");
 
 // Get current CPU structure (using GS segment)
 // GS_BASE points to cpu_t, and self (at offset 0) points back to itself

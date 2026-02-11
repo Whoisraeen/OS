@@ -9,6 +9,7 @@
 #include "io.h"
 #include "lapic.h"
 #include "syscall.h"
+#include "string.h"
 
 // Request SMP information from Limine
 __attribute__((used, section(".requests")))

@@ -1,4 +1,6 @@
 #include "syscall.h"
+#include "keyboard.h"
+#include "mouse.h"
 #include "aio.h"
 #include "idt.h"
 #include "console.h"
@@ -23,8 +25,6 @@
 #include "acpi.h"
 #include "driver.h"
 #include "ext2.h"
-#include "lwip/tcp.h"
-#include "lwip/pbuf.h"
 
 // MSR registers
 #define MSR_EFER     0xC0000080
@@ -57,42 +57,6 @@ static int local_copy_from_user(void *kernel_dst, const void *user_src, size_t s
     return 0;
 }
 
-// Basic Socket Implementation (moved from internal switch)
-typedef struct {
-    struct tcp_pcb *pcb;
-    int type; // 1=STREAM, 2=DGRAM
-    int state;
-    char recv_buf[1024];
-    int recv_head;
-    int recv_tail;
-} socket_t;
-
-typedef struct {
-    uint16_t sin_family;
-    uint16_t sin_port;
-    uint32_t sin_addr;
-    char sin_zero[8];
-} sockaddr_in_t;
-
-static err_t tcp_recv_cb(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err) {
-    (void)err; socket_t *sock = (socket_t *)arg; if (!sock || !p) return ERR_OK;
-    uint8_t *data = (uint8_t *)p->payload;
-    for (uint16_t i = 0; i < p->len; i++) {
-        int next_tail = (sock->recv_tail + 1) % 1024;
-        if (next_tail != sock->recv_head) {
-            sock->recv_buf[sock->recv_tail] = data[i];
-            sock->recv_tail = next_tail;
-        }
-    }
-    pbuf_free(p); return ERR_OK;
-}
-
-static err_t tcp_connected_cb(void *arg, struct tcp_pcb *pcb, err_t err) {
-    (void)err; socket_t *sock = (socket_t *)arg;
-    if (sock) { sock->state = 1; pcb->recv = tcp_recv_cb; pcb->callback_arg = sock; }
-    return ERR_OK;
-}
-
 void syscall_init(void) {
     uint64_t efer = rdmsr(MSR_EFER);
     wrmsr(MSR_EFER, efer | EFER_SCE);
@@ -116,8 +80,11 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
     uint64_t arg2 = regs->rsi;
     uint64_t arg3 = regs->rdx;
 
-    kprintf("[SYSCALL] PID %u called #%lu (arg1=%lx, arg2=%lx, arg3=%lx) at RIP %lx\n", 
-            current_pid, num, arg1, arg2, arg3, regs->rip);
+    if (num != 16) { // SYS_GET_INPUT_EVENT
+        kprintf("[SYSCALL] PID %u called #%lu (arg1=%lx, arg2=%lx, arg3=%lx) at RIP %lx\n", 
+                current_pid, num, arg1, arg2, arg3, regs->rip);
+    }
+
     // uint64_t arg4 = regs->rcx; // Note: syscall instruction clobbers RCX with RIP!
     // But our synthesized frame in interrupts.S puts User RCX into regs->rcx.
 
@@ -128,6 +95,8 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             return 0;
 
         case SYS_WRITE: {
+            if (current_pid == 2) kprintf("[SYSCALL] PID 2 SYS_WRITE len=%lu\n", arg3);
+
             if (!is_user_address(arg2, arg3)) return (uint64_t)-EFAULT;
             
             // Limit write size to avoid large allocations
@@ -212,6 +181,125 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             task_yield();
             return 0;
 
+
+        case SYS_IPC_CREATE: {
+            return (uint64_t)ipc_port_create(current_pid, (uint32_t)arg1);
+        }
+
+        case SYS_IPC_SEND: {
+            ipc_message_t kmsg;
+            if (local_copy_from_user(&kmsg, (void*)arg2, sizeof(ipc_message_t)) < 0) return (uint64_t)-EFAULT;
+            return (uint64_t)ipc_send_message((ipc_port_t)arg1, &kmsg, current_pid, (uint32_t)arg3, 0);
+        }
+
+        case SYS_IPC_RECV: {
+            ipc_message_t kmsg;
+            int ret = ipc_recv_message((ipc_port_t)arg1, &kmsg, current_pid, (uint32_t)arg3, 0);
+            if (ret == 0) {
+                if (copy_to_user((void*)arg2, &kmsg, sizeof(ipc_message_t)) < 0) return (uint64_t)-EFAULT;
+            }
+            return (uint64_t)ret;
+        }
+
+        case SYS_IPC_LOOKUP: {
+            char name[64];
+            if (copy_string_from_user(name, (const char *)arg1, sizeof(name)) < 0) return (uint64_t)-EFAULT;
+            return (uint64_t)ipc_port_lookup(name);
+        }
+
+        case SYS_IPC_REGISTER: {
+            char name[64];
+            if (copy_string_from_user(name, (const char *)arg2, sizeof(name)) < 0) return (uint64_t)-EFAULT;
+            return (uint64_t)ipc_port_register((ipc_port_t)arg1, name);
+        }
+
+        case SYS_IPC_SHMEM_CREATE: {
+            return (uint64_t)ipc_shmem_create((size_t)arg1, current_pid, (uint32_t)arg2);
+        }
+
+        case SYS_IPC_SHMEM_MAP: {
+            return (uint64_t)ipc_shmem_map((uint32_t)arg1, current_pid);
+        }
+
+        case SYS_IPC_SHMEM_UNMAP: {
+            return (uint64_t)ipc_shmem_unmap((uint32_t)arg1, current_pid);
+        }
+
+        case SYS_IRQ_WAIT: {
+            if (!security_has_capability(current_pid, CAP_HW_INPUT)) return (uint64_t)-1;
+            irq_register_waiter((int)arg1, current_task);
+            task_block();
+            return 0;
+        }
+
+        case SYS_IRQ_ACK: {
+            if (!security_has_capability(current_pid, CAP_HW_INPUT)) return (uint64_t)-1;
+            // For now, identity map IRQ to PIC/IOAPIC EOI logic if needed
+            // But usually the kernel handles EOI, drivers just need to clear hardware state
+            return 0;
+        }
+
+        case SYS_CLOCK_GETTIME: {
+            uint64_t ts[2];
+            ts[0] = rtc_get_timestamp();
+            ts[1] = 0; // nsec
+            if (copy_to_user((void*)arg1, ts, sizeof(ts)) < 0) return (uint64_t)-1;
+            return 0;
+        }
+
+        case SYS_SHUTDOWN: {
+            if (!security_has_capability(current_pid, CAP_SYS_REBOOT)) return (uint64_t)-1;
+            kprintf("[SYSCALL] Powering off...\n");
+            // ACPI shutdown or QEMU debug exit
+            outw(0x604, 0x2000); // QEMU/VirtualBox
+            return 0;
+        }
+
+        case SYS_GETDENTS: {
+            // arg1=fd, arg2=buf, arg3=count
+            fd_entry_t *entry = fd_get(current_task->fd_table, (int)arg1);
+            if (!entry || entry->type != FD_FILE || !(entry->node->flags & VFS_DIRECTORY)) return (uint64_t)-1;
+            
+            // Simplified: return one entry at a time for now to keep it easy
+            // We use entry->offset as the index
+            vfs_node_t *node = vfs_readdir(entry->node, entry->offset);
+            if (!node) return 0; // EOF
+            
+            // linux-style dirent64 (simplified)
+            struct {
+                uint64_t d_ino;
+                int64_t  d_off;
+                uint16_t d_reclen;
+                uint8_t  d_type;
+                char     d_name[256];
+            } de;
+            memset(&de, 0, sizeof(de));
+            de.d_ino = node->inode;
+            de.d_off = entry->offset + 1;
+            de.d_type = (node->flags & VFS_DIRECTORY) ? 4 : 8; // DT_DIR : DT_REG
+            strncpy(de.d_name, node->name, 255);
+            de.d_reclen = sizeof(de); // Fix later for variable size
+            
+            if (copy_to_user((void*)arg2, &de, sizeof(de)) < 0) return (uint64_t)-1;
+            entry->offset++;
+            return (uint64_t)sizeof(de);
+        }
+
+        case SYS_IOPORT: {
+            if (!security_has_capability(current_pid, CAP_HW_INPUT)) return (uint64_t)-1;
+            uint16_t port = (uint16_t)arg1;
+            uint16_t val = (uint16_t)arg2;
+            int write = (int)arg3;
+            
+            if (write) {
+                if (val > 0xFF) outw(port, val);
+                else outb(port, (uint8_t)val);
+                return 0;
+            } else {
+                return (uint64_t)inb(port);
+            }
+        }
+
         case SYS_PROC_EXEC: {
             char path[256];
             if (copy_string_from_user(path, (const char *)arg1, sizeof(path)) < 0) return (uint64_t)-1;
@@ -227,6 +315,28 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             int slot = task_create_user(path, buf, node->length, current_pid, ABI_NATIVE);
             kfree(buf);
             return (uint64_t)slot;
+        }
+
+        case SYS_STAT: {
+            char path[256];
+            if (copy_string_from_user(path, (const char *)arg1, sizeof(path)) < 0) return (uint64_t)-1;
+            vfs_node_t *node = vfs_open(path, 0);
+            if (!node) return (uint64_t)-ENOENT;
+
+            struct {
+                uint64_t st_dev; uint64_t st_ino; uint32_t st_mode; uint32_t st_nlink;
+                uint32_t st_uid; uint32_t st_gid; uint64_t st_rdev; uint64_t st_size;
+                uint64_t st_blksize; uint64_t st_blocks; uint64_t st_atime; uint64_t st_mtime;
+                uint64_t st_ctime;
+            } kst;
+            memset(&kst, 0, sizeof(kst));
+            kst.st_ino = node->inode;
+            kst.st_size = node->length;
+            kst.st_mode = (node->flags & VFS_DIRECTORY) ? 0040000 : 0100000; // S_IFDIR : S_IFREG
+            kst.st_mode |= 0755; // Default permissions
+
+            if (copy_to_user((void*)arg2, &kst, sizeof(kst)) < 0) return (uint64_t)-EFAULT;
+            return 0;
         }
 
         case SYS_WAIT: {
@@ -247,68 +357,76 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
         case SYS_GET_FRAMEBUFFER: {
             if (!security_has_capability(current_pid, CAP_HW_VIDEO)) return (uint64_t)-1;
             console_set_enabled(0);
-            extern uint32_t *fb_ptr; extern uint64_t fb_width; extern uint64_t fb_height;
-            uint64_t fb_user_base = FB_USER_BASE; uint64_t fb_size = fb_width * fb_height * 4;
+            
+            extern uint32_t *fb_ptr; 
+            extern uint64_t fb_width; 
+            extern uint64_t fb_height;
+            
+            uint64_t fb_user_base = FB_USER_BASE; 
+            uint64_t fb_size = fb_width * fb_height * 4;
             fb_size = (fb_size + 4095) & ~4095;
-            uint64_t phys_base = ((uint64_t)fb_ptr) - vmm_get_hhdm_offset();
-            for (uint64_t off = 0; off < fb_size; off += 4096) vmm_map_user_page(fb_user_base + off, phys_base + off);
+            
+            // Determine physical address (logic from vmm_init)
+            uint64_t fb_virt_kernel = (uint64_t)fb_ptr;
+            uint64_t fb_phys;
+            
+            // We need kernel_addr_request.response to check kernel range
+            // For now, assume it's either in Kernel or HHDM
+            // Most likely HHDM if it's large.
+            if (fb_virt_kernel >= 0xffffffff80000000ULL) {
+                // Kernel range (rough estimate)
+                fb_phys = fb_virt_kernel - 0xffffffff80000000ULL; // Just a guess without the response struct
+                // Actually, let's use the HHDM offset if it's in higher half but not kernel range
+            } else {
+                fb_phys = fb_virt_kernel - vmm_get_hhdm_offset();
+            }
+            
+            // Map the pages to user space
+            for (uint64_t off = 0; off < fb_size; off += 4096) {
+                vmm_map_user_page(fb_user_base + off, fb_phys + off);
+            }
+            
             typedef struct { uint64_t addr, width, height, pitch; uint32_t bpp; } fb_info_t;
             if (!is_user_address(arg1, sizeof(fb_info_t))) return (uint64_t)-1;
+            
             fb_info_t *info = (fb_info_t *)arg1;
-            info->addr = fb_user_base; info->width = fb_width; info->height = fb_height; info->pitch = fb_width * 4; info->bpp = 32;
+            info->addr = fb_user_base; 
+            info->width = fb_width; 
+            info->height = fb_height; 
+            info->pitch = fb_width * 4; 
+            info->bpp = 32;
+            
             return 0;
-        }
-
-        case SYS_SOCKET: {
-            if (arg1 != 2 || arg2 != 1) return (uint64_t)-1;
-            int fd = fd_alloc(current_task->fd_table);
-            if (fd < 0) return (uint64_t)-1;
-            socket_t *sock = kmalloc(sizeof(socket_t));
-            if (!sock) { fd_free(current_task->fd_table, fd); return (uint64_t)-1; }
-            memset(sock, 0, sizeof(socket_t));
-            sock->type = arg2; sock->pcb = tcp_new();
-            if (!sock->pcb) { kfree(sock); fd_free(current_task->fd_table, fd); return (uint64_t)-1; }
-            fd_entry_t *entry = fd_get(current_task->fd_table, fd);
-            entry->type = FD_SOCKET; entry->socket = sock; entry->flags = O_RDWR;
-            return (uint64_t)fd;
-        }
-
-        case SYS_CONNECT: {
-            fd_entry_t *entry = fd_get(current_task->fd_table, (int)arg1);
-            if (!entry || entry->type != FD_SOCKET) return (uint64_t)-1;
-            sockaddr_in_t addr;
-            if (local_copy_from_user(&addr, (void*)arg2, sizeof(sockaddr_in_t)) < 0) return (uint64_t)-EFAULT;
-            socket_t *sock = (socket_t*)entry->socket;
-            tcp_connect(sock->pcb, addr.sin_addr, addr.sin_port, tcp_connected_cb);
-            sock->pcb->callback_arg = sock;
-            return 0;
-        }
-
-        case SYS_SEND: {
-            fd_entry_t *entry = fd_get(current_task->fd_table, (int)arg1);
-            if (!entry || entry->type != FD_SOCKET) return (uint64_t)-1;
-            socket_t *sock = (socket_t*)entry->socket;
-            void *kbuf = kmalloc(arg3); if (!kbuf) return (uint64_t)-1;
-            if (local_copy_from_user(kbuf, (void*)arg2, (size_t)arg3) < 0) { kfree(kbuf); return (uint64_t)-EFAULT; }
-            tcp_write(sock->pcb, kbuf, (uint16_t)arg3, 0); kfree(kbuf);
-            return arg3;
-        }
-
-        case SYS_RECV: {
-            fd_entry_t *entry = fd_get(current_task->fd_table, (int)arg1);
-            if (!entry || entry->type != FD_SOCKET) return (uint64_t)-1;
-            socket_t *sock = (socket_t *)entry->socket;
-            size_t bytes_read = 0; uint8_t *ubuf = (uint8_t *)arg2;
-            while (bytes_read < arg3 && sock->recv_head != sock->recv_tail) {
-                uint8_t c = (uint8_t)sock->recv_buf[sock->recv_head];
-                if (copy_to_user(&ubuf[bytes_read], &c, 1) < 0) break;
-                sock->recv_head = (sock->recv_head + 1) % 1024; bytes_read++;
-            }
-            return (uint64_t)bytes_read;
         }
 
         case SYS_GET_INPUT_EVENT: {
-            // Stub: return 0 (no event available)
+            typedef struct {
+                uint32_t type; // 1=Key, 2=Mouse
+                uint32_t code; // Keycode or Buttons
+                int32_t x;     // Mouse X
+                int32_t y;     // Mouse Y
+            } input_event_t;
+
+            input_event_t *uevt = (input_event_t *)arg1;
+            if (!is_user_address(arg1, sizeof(input_event_t))) return (uint64_t)-1;
+
+            uint32_t type, code, buttons;
+            int32_t x, y;
+
+            // Check mouse first
+            if (get_mouse_event(&type, &buttons, &x, &y)) {
+                input_event_t kevt = { .type = type, .code = buttons, .x = x, .y = y };
+                copy_to_user(uevt, &kevt, sizeof(input_event_t));
+                return 1;
+            }
+
+            // Then keyboard
+            if (get_keyboard_event(&type, &code)) {
+                input_event_t kevt = { .type = type, .code = code, .x = 0, .y = 0 };
+                copy_to_user(uevt, &kevt, sizeof(input_event_t));
+                return 1;
+            }
+
             return 0;
         }
 
