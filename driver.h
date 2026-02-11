@@ -46,6 +46,7 @@ typedef struct driver {
 
 // Initialize driver subsystem
 void driver_init(void);
+void driver_init_pci(void);
 
 // Register a driver (returns driver index or -1)
 int driver_register(driver_t *drv);

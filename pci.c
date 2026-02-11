@@ -1,6 +1,7 @@
 #include "pci.h"
 #include "io.h"
 #include "serial.h"
+#include "console.h" // Added for kprintf
 
 // Discovered PCI devices
 static pci_device_t devices[PCI_MAX_DEVICES];
@@ -51,18 +52,39 @@ void pci_config_write16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset,
     outl(PCI_CONFIG_DATA, old);
 }
 
-// Scan one function of a device
-static void pci_scan_function(uint8_t bus, uint8_t slot, uint8_t func) {
-    uint16_t vendor = pci_config_read16(bus, slot, func, PCI_VENDOR_ID);
-    if (vendor == 0xFFFF) return; // No device
+// Forward declarations
+static void pci_scan_function(uint8_t bus, uint8_t slot, uint8_t func);
 
+// Scan all buses recursively
+static void pci_scan_bus(uint8_t bus) {
+    for (uint8_t slot = 0; slot < 32; slot++) {
+        uint16_t vendor = pci_config_read16(bus, slot, 0, PCI_VENDOR_ID);
+        if (vendor == 0xFFFF) continue;
+
+        // Scan Function 0
+        pci_scan_function(bus, slot, 0);
+
+        // Check for multi-function device
+        uint8_t header = pci_config_read8(bus, slot, 0, PCI_HEADER_TYPE);
+        if (header & 0x80) {
+            for (uint8_t func = 1; func < 8; func++) {
+                if (pci_config_read16(bus, slot, func, PCI_VENDOR_ID) != 0xFFFF) {
+                    pci_scan_function(bus, slot, func);
+                }
+            }
+        }
+    }
+}
+
+// Scan a specific function and recurse if bridge
+static void pci_scan_function(uint8_t bus, uint8_t slot, uint8_t func) {
     if (device_count >= PCI_MAX_DEVICES) return;
 
     pci_device_t *dev = &devices[device_count];
     dev->bus = bus;
     dev->slot = slot;
     dev->func = func;
-    dev->vendor_id = vendor;
+    dev->vendor_id = pci_config_read16(bus, slot, func, PCI_VENDOR_ID);
     dev->device_id = pci_config_read16(bus, slot, func, PCI_DEVICE_ID);
     dev->class_code = pci_config_read8(bus, slot, func, PCI_CLASS);
     dev->subclass = pci_config_read8(bus, slot, func, PCI_SUBCLASS);
@@ -85,6 +107,15 @@ static void pci_scan_function(uint8_t bus, uint8_t slot, uint8_t func) {
             bus, slot, func, dev->vendor_id, dev->device_id,
             dev->class_code, dev->subclass, dev->irq_line,
             pci_class_name(dev->class_code, dev->subclass));
+            
+    // Check if this is a PCI-PCI Bridge (Class 0x06, Subclass 0x04)
+    if (dev->class_code == 0x06 && dev->subclass == 0x04) {
+        uint8_t secondary = pci_config_read8(bus, slot, func, 0x19); // Secondary Bus Number
+        kprintf("[PCI] Found Bridge at %02x:%02x.%d -> Bus %d\n", bus, slot, func, secondary);
+        if (secondary > bus) { // Avoid loop or invalid bus
+             pci_scan_bus(secondary);
+        }
+    }
 }
 
 // Get human-readable class name
@@ -129,29 +160,12 @@ static const char *pci_class_name(uint8_t class_code, uint8_t subclass) {
     }
 }
 
-// Scan all buses
-static void pci_scan_bus(uint8_t bus) {
-    for (uint8_t slot = 0; slot < 32; slot++) {
-        uint16_t vendor = pci_config_read16(bus, slot, 0, PCI_VENDOR_ID);
-        if (vendor == 0xFFFF) continue;
-
-        pci_scan_function(bus, slot, 0);
-
-        // Check for multi-function device
-        uint8_t header = pci_config_read8(bus, slot, 0, PCI_HEADER_TYPE);
-        if (header & 0x80) {
-            for (uint8_t func = 1; func < 8; func++) {
-                pci_scan_function(bus, slot, func);
-            }
-        }
-    }
-}
-
 void pci_init(void) {
     device_count = 0;
     kprintf("[PCI] Scanning buses...\n");
 
-    // Check if host bridge is multi-function
+    // Host Bridge check (Bus 0)
+    // Check if host bridge is multi-function (Multiple Roots)
     uint8_t header = pci_config_read8(0, 0, 0, PCI_HEADER_TYPE);
     if (header & 0x80) {
         // Multiple PCI host controllers
@@ -161,19 +175,8 @@ void pci_init(void) {
             }
         }
     } else {
-        // Single bus domain — scan bus 0 and any bridges found
+        // Single Root
         pci_scan_bus(0);
-
-        // Also scan secondary buses from PCI-PCI bridges
-        for (int i = 0; i < device_count; i++) {
-            if (devices[i].class_code == 0x06 && devices[i].subclass == 0x04) {
-                uint8_t secondary = pci_config_read8(
-                    devices[i].bus, devices[i].slot, devices[i].func, 0x19);
-                if (secondary > 0) {
-                    pci_scan_bus(secondary);
-                }
-            }
-        }
     }
 
     kprintf("[PCI] Found %d devices\n", device_count);

@@ -1,10 +1,25 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <stdint.h>
-#include <stddef.h>
 #include "font.h"
 #include "gui.h"
-#include "syscalls.h"
-#include "u_stdlib.h"
 #include "keymap.h"
+#include <unistd.h>
+#include <sys/syscall.h>
+
+// Direct syscall macros for IPC since musl doesn't know our custom syscalls yet
+#define syscall1(n, a1) syscall(n, a1)
+#define syscall2(n, a1, a2) syscall(n, a1, a2)
+#define syscall3(n, a1, a2, a3) syscall(n, a1, a2, a3)
+
+// Import custom syscall numbers
+#include "../syscall.h"
+
+// IPC Constants
+#define IPC_PORT_FLAG_RECEIVE (1 << 1)
+#define IPC_PORT_FLAG_SEND    (1 << 2)
+#define IPC_RECV_NONBLOCK     (1 << 0)
 
 // IPC Message Structure
 typedef struct {
@@ -41,16 +56,14 @@ static void draw_string(uint32_t *buffer, int width, int x, int y, const char *s
     }
 }
 
-void _start(void) {
-    const char *msg = "[INIT] Hello from Userspace! Spawning Compositor...\n";
-    long len = 0; while (msg[len]) len++;
-    syscall3(SYS_WRITE, 1, (long)msg, len);
+int main(void) {
+    printf("[INIT] Hello from Userspace! Spawning Compositor...\n");
     
     // 1. Spawn Compositor
     long pid = syscall1(SYS_PROC_EXEC, (long)"compositor.elf");
     if (pid < 0) {
-        syscall3(SYS_WRITE, 1, (long)"[INIT] Failed to spawn compositor!\n", 35);
-        syscall1(SYS_EXIT, 1);
+        printf("[INIT] Failed to spawn compositor!\n");
+        exit(1);
     }
     
     // 2. Wait for Compositor Service
@@ -190,14 +203,14 @@ void _start(void) {
                 }
                 
             } else {
-                 syscall3(SYS_WRITE, 1, (long)"[INIT] Failed to map shared memory.\n", 36);
+                 printf("[INIT] Failed to map shared memory.\n");
             }
         } else {
-            syscall3(SYS_WRITE, 1, (long)"[INIT] Failed to create shared memory.\n", 39);
+            printf("[INIT] Failed to create shared memory.\n");
         }
 
     } else {
-        syscall3(SYS_WRITE, 1, (long)"[INIT] Compositor service timeout.\n", 35);
+        printf("[INIT] Compositor service timeout.\n");
     }
     
     // Fallback loop if something failed
@@ -205,5 +218,5 @@ void _start(void) {
         syscall3(SYS_YIELD, 0, 0, 0);
     }
     
-    syscall1(SYS_EXIT, 0);
+    return 0;
 }

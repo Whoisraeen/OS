@@ -18,6 +18,51 @@ void driver_init(void) {
     kprintf("[DRIVER] Driver subsystem initialized\n");
 }
 
+// External driver init functions
+extern void xhci_init(void *dev);
+extern void nvme_init(void *dev);
+
+// Simple hardcoded driver table for now
+// In a real OS, drivers would register themselves
+typedef struct {
+    uint8_t class_code;
+    uint8_t subclass;
+    uint8_t prog_if;
+    uint8_t prog_if_mask; // 0xFF = exact match, 0x00 = ignore
+    void (*init)(void *dev);
+    const char *name;
+} pci_driver_def_t;
+
+static pci_driver_def_t pci_drivers[] = {
+    {0x0C, 0x03, 0x30, 0xFF, xhci_init, "XHCI USB"},
+    {0x01, 0x08, 0x02, 0xFF, nvme_init, "NVMe Storage"},
+};
+
+#include "pci.h"
+
+void driver_init_pci(void) {
+    int count = pci_get_device_count();
+    kprintf("[DRIVER] Probing %d PCI devices...\n", count);
+    
+    for (int i = 0; i < count; i++) {
+        pci_device_t *dev = pci_get_device(i);
+        if (!dev) continue;
+        
+        for (long unsigned int d = 0; d < sizeof(pci_drivers) / sizeof(pci_driver_def_t); d++) {
+            pci_driver_def_t *drv = &pci_drivers[d];
+            
+            if (dev->class_code == drv->class_code &&
+                dev->subclass == drv->subclass) {
+                
+                if ((dev->prog_if & drv->prog_if_mask) == (drv->prog_if & drv->prog_if_mask)) {
+                    kprintf("[DRIVER] Matched '%s' for %02x:%02x.%d\n", drv->name, dev->bus, dev->slot, dev->func);
+                    drv->init(dev);
+                }
+            }
+        }
+    }
+}
+
 int driver_register(driver_t *drv) {
     if (!drv || driver_count >= MAX_DRIVERS) return -1;
 

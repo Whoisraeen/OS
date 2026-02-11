@@ -1,0 +1,36 @@
+# Makefile for RaeenOS userspace with Musl libc
+
+CC = gcc
+LD = ld
+
+# Musl paths
+MUSL_DIR = userspace/musl
+MUSL_INC = -I$(MUSL_DIR)/include -I$(MUSL_DIR)/obj/include -I$(MUSL_DIR)/arch/x86_64 -I$(MUSL_DIR)/arch/generic
+MUSL_LIB = $(MUSL_DIR)/lib/libc.a
+
+# Flags
+CFLAGS = -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding \
+         -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib \
+         -mcmodel=small \
+         $(MUSL_INC)
+LDFLAGS = -T linker.ld -static -z max-page-size=0x1000
+
+# Targets
+APPS = initrd/init.elf initrd/compositor.elf initrd/service_manager.elf \
+       initrd/keyboard_driver.elf initrd/mouse_driver.elf initrd/terminal.elf \
+       initrd/panel.elf initrd/audio_server.elf
+
+all: $(APPS)
+
+initrd/%.elf: userspace/%.c $(MUSL_LIB)
+	mkdir -p initrd
+	$(CC) $(CFLAGS) $< $(MUSL_LIB) -o $@ $(LDFLAGS)
+
+$(MUSL_LIB):
+	cd $(MUSL_DIR) && ./configure --disable-shared && $(MAKE) -j4
+
+clean:
+	rm -f initrd/*.elf
+	cd $(MUSL_DIR) && make clean
+
+.PHONY: all clean

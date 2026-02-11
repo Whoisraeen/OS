@@ -29,7 +29,7 @@ SRCS = kernel.c gdt.c idt.c pic.c keyboard.c pmm.c vmm.c heap.c serial.c \
        spinlock.c cpu.c lapic.c mutex.c semaphore.c fd.c pipe.c signal.c \
        futex.c vm_area.c acpi.c ioapic.c rtc.c driver.c pci.c dma.c \
        devfs.c ahci.c bga.c block.c partition.c bcache.c ext2.c klog.c ksyms.c \
-       aio.c drivers/e1000.c drivers/hda.c net/sys_arch.c net/core/pbuf.c \
+       aio.c drivers/e1000.c drivers/hda.c drivers/usb/xhci.c drivers/nvme.c net/sys_arch.c net/core/pbuf.c \
        net/core/netif.c net/core/ip.c net/core/tcp.c net/core/arp.c \
        compat/linux/linux_syscall.c
 

@@ -373,6 +373,9 @@ void _start(void) {
     
     // Initialize PCI bus enumeration
     pci_init();
+    
+    // Initialize Drivers (Dependency Scanning)
+    driver_init_pci();
 
     // Initialize AHCI Storage
     // ahci_init();
