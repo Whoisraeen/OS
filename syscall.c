@@ -35,11 +35,27 @@
 // EFER bits
 #define EFER_SCE 0x01  // System Call Enable
 
+#define EPERM   1
+#define ENOENT  2
+#define EBADF   9
+#define ENOMEM  12
+#define EFAULT  14
+#define EINVAL  22
+
 // External assembly handler
 extern void syscall_entry(void);
 
 // External Linux handler
 extern uint64_t linux_syscall_handler(struct interrupt_frame *regs);
+
+// Forward declaration if vmm.h fails
+// int copy_from_user(void *kernel_dst, const void *user_src, size_t size);
+
+static int local_copy_from_user(void *kernel_dst, const void *user_src, size_t size) {
+    if (!is_user_address((uint64_t)user_src, size)) return -1;
+    memcpy(kernel_dst, user_src, size);
+    return 0;
+}
 
 // Basic Socket Implementation (moved from internal switch)
 typedef struct {
@@ -95,17 +111,13 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
         return (uint64_t)-1;
     }
 
-    // kprintf("[SYSCALL] PID %u called #%lu (arg1=%lx, arg2=%lx, arg3=%lx) at RIP %lx\n", 
-    //        current_pid, num, regs->rdi, regs->rsi, regs->rdx, regs->rip);
-
-    if (current_task->abi == ABI_LINUX) {
-        return linux_syscall_handler(regs);
-    }
-
     // Mapping for convenience
     uint64_t arg1 = regs->rdi;
     uint64_t arg2 = regs->rsi;
     uint64_t arg3 = regs->rdx;
+
+    kprintf("[SYSCALL] PID %u called #%lu (arg1=%lx, arg2=%lx, arg3=%lx) at RIP %lx\n", 
+            current_pid, num, arg1, arg2, arg3, regs->rip);
     // uint64_t arg4 = regs->rcx; // Note: syscall instruction clobbers RCX with RIP!
     // But our synthesized frame in interrupts.S puts User RCX into regs->rcx.
 
@@ -116,16 +128,35 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             return 0;
 
         case SYS_WRITE: {
-            if (!is_user_address(arg2, arg3)) return (uint64_t)-1;
-            fd_entry_t *entry = fd_get(current_task->fd_table, (int)arg1);
-            if (!entry) return (uint64_t)-1;
-            if (entry->type == FD_DEVICE && entry->dev->write)
-                return entry->dev->write(entry->dev, (const uint8_t *)arg2, arg3);
-            if (entry->type == FD_FILE && entry->node) {
-                size_t written = vfs_write(entry->node, entry->offset, arg3, (uint8_t *)arg2);
-                entry->offset += written; return written;
+            if (!is_user_address(arg2, arg3)) return (uint64_t)-EFAULT;
+            
+            // Limit write size to avoid large allocations
+            if (arg3 > 1024 * 1024) arg3 = 1024 * 1024;
+            
+            void *kbuf = kmalloc((size_t)arg3);
+            if (!kbuf) return (uint64_t)-ENOMEM;
+            
+            if (local_copy_from_user(kbuf, (void*)arg2, (size_t)arg3) < 0) {
+                kfree(kbuf);
+                return (uint64_t)-EFAULT;
             }
-            return (uint64_t)-1;
+
+            uint64_t ret = (uint64_t)-EBADF;
+            fd_entry_t *entry = fd_get(current_task->fd_table, (int)arg1);
+            if (entry) {
+                 if (entry->type == FD_DEVICE && entry->dev->write) {
+                     ret = entry->dev->write(entry->dev, (const uint8_t *)kbuf, (size_t)arg3);
+                 } else if (entry->type == FD_FILE && entry->node) {
+                     size_t written = vfs_write(entry->node, entry->offset, (size_t)arg3, (uint8_t *)kbuf);
+                     entry->offset += written;
+                     ret = written;
+                 }
+            }
+            kfree(kbuf);
+            if ((int64_t)ret < 0) {
+                 kprintf("[SYSCALL] SYS_WRITE ret=%ld\n", (int64_t)ret);
+            }
+            return ret;
         }
 
         case SYS_READ: {
@@ -246,7 +277,7 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             fd_entry_t *entry = fd_get(current_task->fd_table, (int)arg1);
             if (!entry || entry->type != FD_SOCKET) return (uint64_t)-1;
             sockaddr_in_t addr;
-            if (copy_from_user(&addr, (void*)arg2, sizeof(sockaddr_in_t)) < 0) return (uint64_t)-1;
+            if (local_copy_from_user(&addr, (void*)arg2, sizeof(sockaddr_in_t)) < 0) return (uint64_t)-EFAULT;
             socket_t *sock = (socket_t*)entry->socket;
             tcp_connect(sock->pcb, addr.sin_addr, addr.sin_port, tcp_connected_cb);
             sock->pcb->callback_arg = sock;
@@ -258,7 +289,7 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             if (!entry || entry->type != FD_SOCKET) return (uint64_t)-1;
             socket_t *sock = (socket_t*)entry->socket;
             void *kbuf = kmalloc(arg3); if (!kbuf) return (uint64_t)-1;
-            if (copy_from_user(kbuf, (void*)arg2, arg3) < 0) { kfree(kbuf); return (uint64_t)-1; }
+            if (local_copy_from_user(kbuf, (void*)arg2, (size_t)arg3) < 0) { kfree(kbuf); return (uint64_t)-EFAULT; }
             tcp_write(sock->pcb, kbuf, (uint16_t)arg3, 0); kfree(kbuf);
             return arg3;
         }

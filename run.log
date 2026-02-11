@@ -1,5 +1,22 @@
-nasm -felf64 interrupts.S -o interrupts.o
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -Inet/include -c syscall.c -o syscall.o
+syscall.c: In function ‘tcp_recv_cb’:
+syscall.c:77:53: warning: unused parameter ‘pcb’ [-Wunused-parameter]
+   77 | static err_t tcp_recv_cb(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err) {
+      |                                     ~~~~~~~~~~~~~~~~^~~
 ld -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -T linker.ld kernel.o gdt.o idt.o pic.o keyboard.o pmm.o vmm.o heap.o serial.o console.o vfs.o initrd.o syscall.o user.o shell.o timer.o sched.o mouse.o desktop.o speaker.o compositor.o elf.o ipc.o security.o spinlock.o cpu.o lapic.o mutex.o semaphore.o fd.o pipe.o signal.o futex.o vm_area.o acpi.o ioapic.o rtc.o driver.o pci.o dma.o devfs.o ahci.o bga.o block.o partition.o bcache.o ext2.o klog.o ksyms.o aio.o drivers/e1000.o drivers/hda.o net/sys_arch.o net/core/pbuf.o net/core/netif.o net/core/ip.o net/core/tcp.o net/core/arp.o compat/linux/linux_syscall.o interrupts.o -o kernel.elf
+mkdir -p initrd
+gcc -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/service_manager.c -o initrd/service_manager.elf
+tar -cvf initrd.tar -C initrd .
+./
+./audio_server.elf
+./compositor.elf
+./init.elf
+./keyboard_driver.elf
+./mouse_driver.elf
+./panel.elf
+./service_manager.elf
+./terminal.elf
+./test_driver.o
 # Create a directory for the ISO content
 mkdir -p iso_root
 # Copy the kernel, config, and initrd
@@ -23,20 +40,20 @@ Media summary: 0 sessions, 0 data blocks, 0 data,  272g free
 Added to ISO image: directory '/'='/mnt/r/Projects/OS/iso_root'
 xorriso : UPDATE :      10 files added in 1 seconds
 xorriso : UPDATE :      10 files added in 1 seconds
-xorriso : UPDATE :  32.95% done
-ISO image produced: 2452 sectors
-Written to medium : 2452 sectors at LBA 0
+xorriso : UPDATE :  1.30% done
+ISO image produced: 2453 sectors
+Written to medium : 2453 sectors at LBA 0
 Writing to 'stdio:myos.iso' completed successfully.
 
 # Install Limine to the ISO (BIOS boot support)
 ./limine/limine bios-install myos.iso
 Physical block size of 512 bytes.
 Installing to GPT. Logical block size of 512 bytes.
-Secondary header at LBA 0x264f.
+Secondary header at LBA 0x2653.
 Secondary header valid.
 GPT partition NOT specified. Attempting GPT embedding.
 New maximum count of partition entries: 44.
-Stage 2 to be located at 0x1a00 and 0x4c3800.
+Stage 2 to be located at 0x1a00 and 0x4c4000.
 Reminder: Remember to copy the limine-bios.sys file in either
           the root, /boot, /limine, or /boot/limine directories of
           one of the partitions on the device, or boot will fail!

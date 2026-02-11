@@ -133,4 +133,4 @@ run: $(ISO_IMAGE) disk.img
 disk.img:
 	dd if=/dev/zero of=disk.img bs=1M count=64
 
-	rm -rf $(OBJS) $(KERNEL_BIN) $(ISO_IMAGE) iso_root
+
