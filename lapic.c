@@ -19,7 +19,7 @@
 #define LAPIC_TIMER_DIV  0x3E0
 
 static uint64_t lapic_base_addr = 0;
-static uint32_t lapic_ticks_per_10ms = 0;  // Calibrated value
+static volatile uint32_t lapic_ticks_per_10ms = 0;  // Calibrated value (volatile for AP spin-wait)
 static int ioapic_mode = 0;
 
 // Read a value from LAPIC register
@@ -99,9 +99,9 @@ void lapic_timer_calibrate(void) {
 }
 
 void lapic_timer_start(void) {
-    if (lapic_ticks_per_10ms == 0) {
-        kprintf("[LAPIC] Timer not calibrated!\n");
-        return;
+    // Wait for BSP to finish calibration (APs may reach here first)
+    while (lapic_ticks_per_10ms == 0) {
+        __asm__ volatile("pause");
     }
 
     // Set divider to 16

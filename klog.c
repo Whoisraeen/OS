@@ -29,6 +29,8 @@ static bool klog_active = true;
 void klog_putc(char c) {
     if (!klog_active) return; // Prevent recursion during dump
 
+    uint64_t rflags;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(rflags));
     spinlock_acquire(&klog_lock);
     
     klog_buffer[klog_head] = c;
@@ -41,6 +43,7 @@ void klog_putc(char c) {
     }
     
     spinlock_release(&klog_lock);
+    __asm__ volatile("push %0; popfq" : : "r"(rflags));
 }
 
 void klog_puts(const char *str) {

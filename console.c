@@ -18,8 +18,10 @@ static size_t console_rows = 0;
 static uint32_t fg_color = 0xFFFFFFFF; // White
 static uint32_t bg_color = 0xFF003366; // Sony Blue
 static int console_enabled = 1; // Default enabled
+static spinlock_t console_lock = {0};
 
 void console_init(void) {
+    spinlock_init(&console_lock);
     if (fb_ptr == NULL || fb_width == 0 || fb_height == 0) {
         return;
     }
@@ -41,13 +43,22 @@ void console_set_colors(uint32_t fg, uint32_t bg) {
 }
 
 void console_clear(void) {
-    if (fb_ptr == NULL) return;
+    uint64_t rflags;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(rflags));
+    spinlock_acquire(&console_lock);
+    if (fb_ptr == NULL) {
+        spinlock_release(&console_lock);
+        __asm__ volatile("push %0; popfq" : : "r"(rflags));
+        return;
+    }
     
     for (size_t i = 0; i < fb_width * fb_height; i++) {
         fb_ptr[i] = bg_color;
     }
     cursor_x = 0;
     cursor_y = 0;
+    spinlock_release(&console_lock);
+    __asm__ volatile("push %0; popfq" : : "r"(rflags));
 }
 
 static void console_scroll(void) {
@@ -101,9 +112,17 @@ void console_putc(char c) {
     // NOTE: serial_putc is NOT called here. Callers that need serial output
     // (kprintf, console_dev_write) call serial_putc explicitly.
     // This prevents double serial output.
+    
+    uint64_t rflags;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(rflags));
+    spinlock_acquire(&console_lock);
 
     // If console is disabled (GUI owns screen) or not initialized, stop here.
-    if (fb_ptr == NULL || !console_enabled) return;
+    if (fb_ptr == NULL || !console_enabled) {
+        spinlock_release(&console_lock);
+        __asm__ volatile("push %0; popfq" : : "r"(rflags));
+        return;
+    }
     
     if (c == '\n') {
         cursor_x = 0;
@@ -133,6 +152,8 @@ void console_putc(char c) {
         console_scroll();
         cursor_y = console_rows - 1;
     }
+    spinlock_release(&console_lock);
+    __asm__ volatile("push %0; popfq" : : "r"(rflags));
 }
 
 void console_puts(const char *str) {

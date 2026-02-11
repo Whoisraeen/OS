@@ -1,0 +1,71 @@
+#ifndef LINUX_SYSCALLS_H
+#define LINUX_SYSCALLS_H
+
+/* Linux x86_64 Syscall Numbers */
+#define LINUX_SYS_READ          0
+#define LINUX_SYS_WRITE         1
+#define LINUX_SYS_OPEN          2
+#define LINUX_SYS_CLOSE         3
+#define LINUX_SYS_STAT          4
+#define LINUX_SYS_FSTAT         5
+#define LINUX_SYS_LSTAT         6
+#define LINUX_SYS_POLL          7
+#define LINUX_SYS_LSEEK         8
+#define LINUX_SYS_MMAP          9
+#define LINUX_SYS_MPROTECT      10
+#define LINUX_SYS_MUNMAP        11
+#define LINUX_SYS_BRK           12
+#define LINUX_SYS_RT_SIGACTION  13
+#define LINUX_SYS_RT_SIGPROCMASK 14
+#define LINUX_SYS_IOCTL         16
+#define LINUX_SYS_ACCESS        21
+#define LINUX_SYS_PIPE          22
+#define LINUX_SYS_SELECT        23
+#define LINUX_SYS_SCHED_YIELD   24
+#define LINUX_SYS_MREMAP        25
+#define LINUX_SYS_DUP           32
+#define LINUX_SYS_DUP2          33
+#define LINUX_SYS_PAUSE         34
+#define LINUX_SYS_NANOSLEEP     35
+#define LINUX_SYS_GETPID        39
+#define LINUX_SYS_SOCKET        41
+#define LINUX_SYS_CONNECT       42
+#define LINUX_SYS_ACCEPT        43
+#define LINUX_SYS_SENDTO        44
+#define LINUX_SYS_RECVFROM      45
+#define LINUX_SYS_SHUTDOWN      48
+#define LINUX_SYS_BIND          49
+#define LINUX_SYS_LISTEN        50
+#define LINUX_SYS_GETSOCKNAME   51
+#define LINUX_SYS_GETPEERNAME   52
+#define LINUX_SYS_CLONE         56
+#define LINUX_SYS_FORK          57
+#define LINUX_SYS_VFORK         58
+#define LINUX_SYS_EXECVE        59
+#define LINUX_SYS_EXIT          60
+#define LINUX_SYS_WAIT4         61
+#define LINUX_SYS_KILL          62
+#define LINUX_SYS_UNAME         63
+#define LINUX_SYS_FCNTL         72
+#define LINUX_SYS_GETDENTS      78
+#define LINUX_SYS_GETCWD        79
+#define LINUX_SYS_CHDIR         80
+#define LINUX_SYS_RENAME        82
+#define LINUX_SYS_MKDIR         83
+#define LINUX_SYS_RMDIR         84
+#define LINUX_SYS_UNLINK        87
+#define LINUX_SYS_GETUID        102
+#define LINUX_SYS_GETGID        104
+#define LINUX_SYS_GETPPID       110
+#define LINUX_SYS_SIGRETURN     117
+#define LINUX_SYS_ARCH_PRCTL    158
+#define LINUX_SYS_FUTEX         202
+#define LINUX_SYS_SET_TID_ADDRESS 218
+#define LINUX_SYS_EXIT_GROUP    231
+#define LINUX_SYS_OPENAT        257
+#define LINUX_SYS_MKDIRAT       258
+#define LINUX_SYS_FSTATAT       262
+#define LINUX_SYS_UNLINKAT      263
+#define LINUX_SYS_RENAMEAT      264
+
+#endif

@@ -15,9 +15,16 @@
 void _start(void) {
     syscall3(SYS_WRITE, 1, (long)"[KBD] Keyboard Driver Started\n", 30);
     
-    // 1. Register IPC Port "keyboard"
-    long port_id = syscall2(SYS_IPC_REGISTER, 0, (long)"keyboard");
-    if (port_id < 0) {
+    // 1. Create IPC Port
+    long port_id = syscall1(SYS_IPC_CREATE, 0); // 0 = Default flags
+    if (port_id <= 0) {
+        syscall3(SYS_WRITE, 1, (long)"[KBD] Failed to create IPC port\n", 32);
+        syscall1(SYS_EXIT, 1);
+    }
+
+    // 2. Register IPC Port "keyboard"
+    long res = syscall2(SYS_IPC_REGISTER, port_id, (long)"keyboard");
+    if (res < 0) {
         syscall3(SYS_WRITE, 1, (long)"[KBD] Failed to register IPC port\n", 34);
         syscall1(SYS_EXIT, 1);
     }

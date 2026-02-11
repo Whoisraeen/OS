@@ -217,11 +217,13 @@ uint64_t isr_handler(struct interrupt_frame *frame) {
         }
         console_set_colors(0xFFFFFFFF, 0xFFFF0000);
         console_clear();
-        kprintf("*** KERNEL PANIC (%s) ***\n", name);
+        kprintf("*** KERNEL PANIC (%s) on CPU %d ***\n", name, lapic_id());
         kprintf("Error code: 0x%lx\n", frame->err_code);
         kprintf("RIP: 0x%lx  CS: 0x%lx\n", frame->rip, frame->cs);
         kprintf("RSP: 0x%lx  SS: 0x%lx\n", frame->rsp, frame->ss);
         kprintf("RFLAGS: 0x%lx\n", frame->rflags);
+        kprintf("RAX: 0x%lx  RBX: 0x%lx\n", frame->rax, frame->rbx);
+        kprintf("RCX: 0x%lx  RDX: 0x%lx\n", frame->rcx, frame->rdx);
         klog_dump();
         for (;;) __asm__("hlt");
     }

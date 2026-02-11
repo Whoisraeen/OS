@@ -42,7 +42,16 @@ void on_shutdown_click(gui_widget_t *w, void *data) {
 
 static void update_clock() {
     char buf[32];
-    uint64_t now_sec = syscall0(SYS_CLOCK_GETTIME);
+    
+    // SYS_CLOCK_GETTIME expects a timespec pointer
+    struct {
+        uint64_t tv_sec;
+        uint64_t tv_nsec;
+    } ts;
+    
+    if (syscall1(SYS_CLOCK_GETTIME, (long)&ts) != 0) return;
+    
+    uint64_t now_sec = ts.tv_sec;
     
     // Format HH:MM:SS (Assuming UTC for now)
     // Simple modulo arithmetic
@@ -53,8 +62,9 @@ static void update_clock() {
     snprintf(buf, 32, "%02d:%02d:%02d", (int)hour, (int)min, (int)sec);
     
     // Only update if changed (to avoid flickering if no double buffering on label)
-    if (strcmp(clock_label->text, buf) != 0) {
-        strncpy(clock_label->text, buf, 31);
+    gui_label_t *label = (gui_label_t *)clock_label;
+    if (strcmp(label->text, buf) != 0) {
+        strncpy(label->text, buf, 31);
         gui_window_update(win);
     }
 }

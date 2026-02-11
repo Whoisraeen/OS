@@ -31,7 +31,10 @@ typedef struct {
     // MUST be at offset 0: get_cpu() reads gs:[0] to get self pointer
     uint64_t self;
 
-    // MUST be at offset 8: syscall_entry saves/restores user RSP here
+    // Stack for AP startup (trampoline) - Offset 8
+    uint64_t startup_stack_top;
+
+    // Scratch space for syscall handler - Offset 16
     uint64_t syscall_scratch;
 
     uint32_t lapic_id;      // Local APIC ID
@@ -42,7 +45,7 @@ typedef struct {
     struct tss tss;
 
     // Pointer to current running task on this CPU
-    void *current_task;
+    struct task_t *current_task;
 
     // Scheduler Run Queue (Linked List)
     struct task_t *run_queue_head;
@@ -58,8 +61,10 @@ typedef struct {
 // Compile-time offset verification for assembly compatibility
 _Static_assert(__builtin_offsetof(cpu_t, self) == 0,
     "cpu_t.self must be at offset 0 for get_cpu()");
-_Static_assert(__builtin_offsetof(cpu_t, syscall_scratch) == 8,
-    "cpu_t.syscall_scratch must be at offset 8 for syscall_entry");
+_Static_assert(__builtin_offsetof(cpu_t, startup_stack_top) == 8,
+    "cpu_t.startup_stack_top must be at offset 8 for smp_ap_trampoline");
+_Static_assert(__builtin_offsetof(cpu_t, syscall_scratch) == 16,
+    "cpu_t.syscall_scratch must be at offset 16 for syscall_entry");
 
 // Get current CPU structure (using GS segment)
 // GS_BASE points to cpu_t, and self (at offset 0) points back to itself

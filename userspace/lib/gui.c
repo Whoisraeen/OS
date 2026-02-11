@@ -18,11 +18,10 @@ typedef struct {
 } ipc_message_t;
 
 typedef struct {
-    char title[64];
-    int x, y;
-    int w, h;
+    int x, y, w, h;
     uint32_t shmem_id;
     uint32_t reply_port;
+    char title[32];
 } msg_create_window_t;
 
 typedef struct {
@@ -159,7 +158,8 @@ gui_window_t *gui_create_window(const char *title, int width, int height) {
     
     // Send Create Message to Compositor
     msg_create_window_t req;
-    strncpy(req.title, title, 63);
+    strncpy(req.title, title, 31);
+    req.title[31] = '\0';
     req.x = 100; // Default pos
     req.y = 100;
     req.w = width;

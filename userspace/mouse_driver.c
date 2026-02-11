@@ -54,9 +54,16 @@ static uint8_t mouse_read(void) {
 void _start(void) {
     syscall3(SYS_WRITE, 1, (long)"[MOUSE] Driver Started\n", 23);
 
-    // 1. Register IPC Port
-    long port_id = syscall2(SYS_IPC_REGISTER, 0, (long)"mouse");
-    if (port_id < 0) {
+    // 1. Create IPC Port
+    long port_id = syscall1(SYS_IPC_CREATE, 0);
+    if (port_id <= 0) {
+        syscall3(SYS_WRITE, 1, (long)"[MOUSE] Failed to create port\n", 30);
+        syscall1(SYS_EXIT, 1);
+    }
+
+    // 2. Register IPC Port "mouse"
+    long res = syscall2(SYS_IPC_REGISTER, port_id, (long)"mouse");
+    if (res < 0) {
         syscall3(SYS_WRITE, 1, (long)"[MOUSE] Failed to register port\n", 32);
         syscall1(SYS_EXIT, 1);
     }

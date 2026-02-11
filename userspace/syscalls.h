@@ -57,6 +57,8 @@
 #define SYS_AIO_SUBMIT   69
 #define SYS_AIO_WAIT     70
 #define SYS_SEC_GRANT    71
+#define SYS_WRITEV       72
+#define SYS_ARCH_PRCTL   73
 
 // Socket Syscalls
 #define SYS_SOCKET       80

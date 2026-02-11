@@ -8,6 +8,7 @@
 #include "heap.h"
 #include "io.h"
 #include "lapic.h"
+#include "syscall.h"
 
 // Request SMP information from Limine
 __attribute__((used, section(".requests")))
@@ -28,9 +29,12 @@ static void setup_cpu_gdt(cpu_t *cpu) {
 
 // Entry point for Application Processors (APs)
 // Limine jumps here for each core
-static void smp_ap_entry(struct limine_smp_info *info) {
+void smp_ap_entry(struct limine_smp_info *info) {
     cpu_t *cpu = (cpu_t *)info->extra_argument;
-    
+
+    // 0. Switch to kernel page tables (Limine's AP tables lack our mappings)
+    vmm_switch();
+
     // 1. Load GDT
     struct gdt_ptr gdt_ptr;
     gdt_ptr.limit = sizeof(struct gdt_entry) * 7 - 1;
@@ -57,6 +61,12 @@ static void smp_ap_entry(struct limine_smp_info *info) {
     
     // 5. Initialize LAPIC (and Timer)
     lapic_init();
+
+    // 5b. Initialize SYSCALL/SYSRET MSRs (per-CPU)
+    syscall_init();
+    
+    // Start LAPIC Timer on AP (using calibration from BSP)
+    lapic_timer_start();
     
     // Disable SMAP/SMEP (Bits 20, 21 of CR4)
     uint64_t cr4;
@@ -112,6 +122,13 @@ void smp_init(void) {
         return;
     }
     
+    // DEBUG: Verify offsets for assembly
+    uint64_t base = (uint64_t)&cpus[0];
+    uint64_t scratch = (uint64_t)&cpus[0].syscall_scratch;
+    uint64_t rsp0 = (uint64_t)&cpus[0].tss.rsp0;
+    kprintf("[DEBUG] cpu_t offsets: scratch=%lu, tss.rsp0=%lu\n", 
+            scratch - base, rsp0 - base);
+    
     // Initialize BSP (Bootstrap Processor - CPU 0)
     // We are running on it right now.
     struct limine_smp_info *bsp_info = NULL;
@@ -126,6 +143,16 @@ void smp_init(void) {
         // Setup GDT/TSS for this core
         setup_cpu_gdt(&cpus[i]);
         
+        // Allocate startup stack for AP (4KB is enough for init)
+        // We use PMM directly to get a page
+        void *stack_page = pmm_alloc_page();
+        if (stack_page) {
+            // Stack grows down from top of page + HHDM
+            cpus[i].startup_stack_top = (uint64_t)stack_page + 0xFFFF800000000000ULL + 4096;
+        } else {
+            kprintf("[SMP] Failed to allocate stack for CPU %d\n", i);
+        }
+
         // Pass cpu_t pointer to the AP
         info->extra_argument = (uint64_t)&cpus[i];
         
@@ -133,7 +160,19 @@ void smp_init(void) {
             bsp_info = info;
             kprintf("[SMP] CPU %d is BSP\n", i);
             
-            // Setup GS for BSP immediately
+            // CRITICAL: Reload GDT and TSS for BSP to use per-CPU structures
+            // Otherwise TR points to old kernel_tss, but scheduler updates cpus[i].tss
+            struct gdt_ptr gdt_ptr;
+            gdt_ptr.limit = sizeof(struct gdt_entry) * 7 - 1;
+            gdt_ptr.base = (uint64_t)&cpus[i].gdt;
+            
+            extern void global_gdt_flush(uint64_t);
+            global_gdt_flush((uint64_t)&gdt_ptr);
+            
+            extern void tss_flush(void);
+            tss_flush();
+            
+            // Setup GS for BSP immediately (AFTER GDT flush which resets GS)
             uint64_t gs_base = (uint64_t)&cpus[i];
             wrmsr(0xC0000101, gs_base);
             wrmsr(0xC0000102, 0); // KERNEL_GS_BASE = 0 (User Base)
@@ -141,11 +180,14 @@ void smp_init(void) {
             // Initialize LAPIC on BSP too
             lapic_init();
             
+            kprintf("[SMP] BSP GDT/TSS reloaded.\n");
+            
         } else {
             // Wake up AP
             // Limine handles the IPI sequence (INIT-SIPI-SIPI)
-            // We just set the goto_address
-            info->goto_address = smp_ap_entry;
+            // We set goto_address to our assembly trampoline which sets up RSP
+            extern void smp_ap_trampoline(struct limine_smp_info *info);
+            info->goto_address = smp_ap_trampoline;
         }
     }
     
@@ -153,7 +195,7 @@ void smp_init(void) {
 }
 
 int smp_get_cpu_count(void) {
-    if (cpu_count == 0) return 1; // Fallback for BSP if SMP init failed or not yet called
+    if (cpu_count <= 0) return 1; 
     return cpu_count;
 }
 

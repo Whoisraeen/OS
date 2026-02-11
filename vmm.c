@@ -220,6 +220,10 @@ void vmm_map_user_page(uint64_t virt, uint64_t phys) {
 
     if (!(pml4[pml4_idx] & PTE_PRESENT)) {
         uint64_t new_phys = (uint64_t)pmm_alloc_page();
+        if (!new_phys) {
+             kprintf("[VMM] OOM allocating PML4 entry for %lx\n", virt);
+             return;
+        }
         uint64_t *new_virt = (uint64_t *)phys_to_virt(new_phys);
         for (int i = 0; i < 512; i++) new_virt[i] = 0;
         pml4[pml4_idx] = new_phys | intermediate_flags;
@@ -230,6 +234,10 @@ void vmm_map_user_page(uint64_t virt, uint64_t phys) {
     uint64_t *pdpt = (uint64_t *)phys_to_virt(pml4[pml4_idx] & PTE_ADDR_MASK);
     if (!(pdpt[pdpt_idx] & PTE_PRESENT)) {
         uint64_t new_phys = (uint64_t)pmm_alloc_page();
+        if (!new_phys) {
+             kprintf("[VMM] OOM allocating PDPT entry for %lx\n", virt);
+             return;
+        }
         uint64_t *new_virt = (uint64_t *)phys_to_virt(new_phys);
         for (int i = 0; i < 512; i++) new_virt[i] = 0;
         pdpt[pdpt_idx] = new_phys | intermediate_flags;
@@ -240,6 +248,10 @@ void vmm_map_user_page(uint64_t virt, uint64_t phys) {
     uint64_t *pd = (uint64_t *)phys_to_virt(pdpt[pdpt_idx] & PTE_ADDR_MASK);
     if (!(pd[pd_idx] & PTE_PRESENT)) {
         uint64_t new_phys = (uint64_t)pmm_alloc_page();
+        if (!new_phys) {
+             kprintf("[VMM] OOM allocating PD entry for %lx\n", virt);
+             return;
+        }
         uint64_t *new_virt = (uint64_t *)phys_to_virt(new_phys);
         for (int i = 0; i < 512; i++) new_virt[i] = 0;
         pd[pd_idx] = new_phys | intermediate_flags;

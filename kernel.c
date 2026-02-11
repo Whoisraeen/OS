@@ -274,7 +274,7 @@ void _start(void) {
 
     // Initialize Serial (for debug output)
     serial_init();
-    klog_init(); // Initialize kernel log buffer
+    klog_init(); // Initialize kernel log buffer (once)
     kprintf("\n[KERNEL] GDT initialized.\n");
 
     // Initialize IDT
@@ -442,7 +442,7 @@ void _start(void) {
     }
 
     // Initialize Kernel Log Buffer
-    klog_init();
+    // klog_init(); // Already initialized early
 
     // Initialize graphical console
     console_init();

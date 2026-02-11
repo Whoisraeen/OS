@@ -102,6 +102,10 @@ void scheduler_init(void) {
 // Internal task creation with option to not auto-enqueue
 // When auto_enqueue=false, caller is responsible for enqueuing after setup
 static int task_create_ex(const char *name, void (*entry)(void), bool auto_enqueue) {
+    // Disable interrupts to prevent deadlock with ISR using tasks_alloc_lock
+    uint64_t rflags;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(rflags));
+
     spinlock_acquire(&tasks_alloc_lock);
 
     // Find free slot in global pool
@@ -115,25 +119,30 @@ static int task_create_ex(const char *name, void (*entry)(void), bool auto_enque
 
     if (slot == -1) {
         spinlock_release(&tasks_alloc_lock);
+        if (rflags & 0x200) __asm__ volatile("sti"); // Restore IF
         kprintf("[SCHED] No free task slots\n");
         return -1;
     }
 
     // Reserve slot
-    tasks[slot].state = TASK_READY;
+    tasks[slot].state = TASK_ALLOCATING;
     num_tasks++;
 
     spinlock_release(&tasks_alloc_lock);
+    if (rflags & 0x200) __asm__ volatile("sti"); // Restore IF
 
     // Allocate stack
     void *stack = pmm_alloc_pages((TASK_STACK_SIZE + 4095) / 4096);
     if (!stack) {
         kprintf("[SCHED] OOM allocating stack\n");
-        // Fix: properly release the slot on failure
+        
+        __asm__ volatile("pushfq; pop %0; cli" : "=r"(rflags));
         spinlock_acquire(&tasks_alloc_lock);
         tasks[slot].state = TASK_UNUSED;
         num_tasks--;
         spinlock_release(&tasks_alloc_lock);
+        if (rflags & 0x200) __asm__ volatile("sti");
+        
         return -1;
     }
 
@@ -190,11 +199,13 @@ static int task_create_ex(const char *name, void (*entry)(void), bool auto_enque
 
     // Assign to CPU (Round Robin)
     int cpu_count = smp_get_cpu_count();
+    if (cpu_count <= 0) cpu_count = 1; // Safety check for Division Error
     uint32_t target_cpu_id = __sync_fetch_and_add(&next_cpu_rr, 1) % cpu_count;
     tasks[slot].cpu_id = target_cpu_id;
 
     // Only enqueue if auto_enqueue is true
     if (auto_enqueue) {
+        tasks[slot].state = TASK_READY;
         cpu_t *target_cpu = smp_get_cpu_by_id(target_cpu_id);
         if (target_cpu) {
             // Disable interrupts to prevent deadlock with scheduler ISR
@@ -208,6 +219,15 @@ static int task_create_ex(const char *name, void (*entry)(void), bool auto_enque
         } else {
             kprintf("[SCHED] Error: Target CPU %d not found!\n", target_cpu_id);
         }
+    } else {
+        // Mark as ready but don't enqueue (caller will handle)
+        // Wait, if we mark it READY here, scheduler might pick it up via other means?
+        // No, scheduler only runs from runqueue.
+        // But for safety, keep it ALLOCATING/BUILDING until caller is done?
+        // task_create_user sets it READY before enqueuing?
+        // Let's set it READY here if not enqueued? 
+        // No, task_create_user needs to finish setup.
+        // So we leave it as TASK_ALLOCATING.
     }
 
     return slot;
@@ -251,6 +271,17 @@ int task_create_user(const char *name, const void *elf_data, size_t size, uint32
     uint64_t last_stack_phys = 0;
     for (uint64_t addr = user_stack_base; addr < user_stack_top; addr += 4096) {
         uint64_t phys = (uint64_t)pmm_alloc_page();
+        if (!phys) {
+            kprintf("[SCHED] OOM allocating stack for task %d\n", slot);
+            // TODO: Cleanup previous pages?
+            // Switch back CR3 and fail
+            __asm__ volatile("mov %0, %%cr3" : : "r"(old_cr3) : "memory");
+            spinlock_acquire(&tasks_alloc_lock);
+            task->state = TASK_UNUSED;
+            num_tasks--;
+            spinlock_release(&tasks_alloc_lock);
+            return -1;
+        }
         if (addr + 4096 >= user_stack_top) last_stack_phys = phys;
         vmm_map_user_page(addr, phys); // Uses current CR3 = user PML4
     }
@@ -382,6 +413,8 @@ int task_create_user(const char *name, const void *elf_data, size_t size, uint32
     if (target_cpu) {
         kprintf("[SCHED] Enqueuing task %d on CPU %d (lock=%d)\n", slot, task->cpu_id, target_cpu->lock.locked);
         
+        task->state = TASK_READY;
+
         // Disable interrupts to prevent deadlock with scheduler ISR
         __asm__ volatile("cli");
         spinlock_acquire(&target_cpu->lock);
@@ -555,6 +588,9 @@ void task_block(void) {
     cpu_t *cpu = get_cpu();
     if (!cpu) return;
 
+    uint64_t rflags;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(rflags));
+
     spinlock_acquire(&cpu->lock);
     task_t *current = (task_t *)cpu->current_task;
     if (current) {
@@ -564,6 +600,8 @@ void task_block(void) {
 
     // Yield — scheduler_switch will NOT re-enqueue a BLOCKED task
     __asm__ volatile("int $0x40");
+    
+    if (rflags & 0x200) __asm__ volatile("sti");
 }
 
 void task_unblock(task_t *task) {
@@ -711,8 +749,9 @@ int task_create_thread(uint64_t entry, uint64_t arg, uint64_t user_stack) {
     tasks[slot].name[i++] = 'T';
     tasks[slot].name[i] = 0;
 
-    // Assign to CPU (round robin)
+    // Assign to CPU (Round Robin)
     int cpu_count = smp_get_cpu_count();
+    if (cpu_count <= 0) cpu_count = 1;
     uint32_t target_cpu_id = __sync_fetch_and_add(&next_cpu_rr, 1) % cpu_count;
     tasks[slot].cpu_id = target_cpu_id;
 
@@ -878,9 +917,13 @@ static void reap_child(task_t *child) {
         child->stack_base = NULL;
     }
     child->state = TASK_UNUSED;
+    
+    uint64_t rflags;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(rflags));
     spinlock_acquire(&tasks_alloc_lock);
     num_tasks--;
     spinlock_release(&tasks_alloc_lock);
+    if (rflags & 0x200) __asm__ volatile("sti");
 }
 
 int task_wait(int *status) {

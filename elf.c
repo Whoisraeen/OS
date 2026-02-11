@@ -304,6 +304,7 @@ uint64_t elf_load_user(const void *data, size_t size) {
             
             // Zero the page via HHDM
             void *kptr = (void*)(phys + vmm_get_hhdm_offset());
+            // kprintf("[ELF] Loading to phys 0x%lx (virt %p)\n", phys, kptr);
             mem_set(kptr, 0, 4096);
             
             // Calculate which part of the file to copy to this page

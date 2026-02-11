@@ -1,0 +1,22 @@
+make: Entering directory '/mnt/r/Projects/OS/userspace/musl'
+Makefile:191: target 'R' doesn't match the target pattern
+Makefile:194: target 'R' doesn't match the target pattern
+Makefile:195: warning: overriding recipe for target 'R'
+Makefile:192: warning: ignoring old recipe for target 'R'
+Makefile:197: target 'R' doesn't match the target pattern
+Makefile:198: warning: overriding recipe for target 'R'
+Makefile:195: warning: ignoring old recipe for target 'R'
+Makefile:200: target 'R' doesn't match the target pattern
+Makefile:201: warning: overriding recipe for target 'R'
+Makefile:198: warning: ignoring old recipe for target 'R'
+Makefile:203: target 'R' doesn't match the target pattern
+Makefile:204: warning: overriding recipe for target 'R'
+Makefile:201: warning: ignoring old recipe for target 'R'
+Makefile:206: target 'R' doesn't match the target pattern
+Makefile:207: warning: overriding recipe for target 'R'
+Makefile:204: warning: ignoring old recipe for target 'R'
+Makefile:209: target 'R' doesn't match the target pattern
+Makefile:210: warning: overriding recipe for target 'R'
+Makefile:207: warning: ignoring old recipe for target 'R'
+Makefile:212: *** target pattern contains no '%'.  Stop.
+make: Leaving directory '/mnt/r/Projects/OS/userspace/musl'

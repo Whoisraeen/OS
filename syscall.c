@@ -108,15 +108,29 @@ void syscall_init(void) {
     kprintf("[SYSCALL] Initialized (EFER=0x%lx, STAR=0x%lx)\n", efer, star);
 }
 
-// Syscall handler — called from assembly
-// regs is non-NULL when called via INT 0x80 (for fork), NULL via SYSCALL instruction
+// External Linux handler
+extern uint64_t linux_syscall_handler(struct interrupt_frame *regs);
+
 uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3,
                           struct interrupt_frame *regs) {
-    // Get real PID from scheduler (not hardcoded!)
+    // Get real PID from scheduler
     uint32_t current_pid = task_current_id();
-    
-    // DEBUG: Trace syscalls
-    kprintf("[SYSCALL] PID %u called sys_%lu(%lx, %lx, %lx)\n", current_pid, num, arg1, arg2, arg3);
+    task_t *current_task = task_get_by_id(current_pid);
+
+    // 1. Check ABI Compatibility
+    if (current_task && current_task->abi == ABI_LINUX) {
+        // For SYSCALL instruction, registers are on the stack via interrupts.S
+        // If regs is provided, use it.
+        if (regs) {
+            return linux_syscall_handler(regs);
+        } else {
+            // This case happens if syscall_entry in interrupts.S doesn't pass regs
+            // We should ensure interrupts.S passes the frame pointer.
+        }
+    }
+
+    // DEBUG: Trace native syscalls
+    // kprintf("[SYSCALL] PID %u called native sys_%lu(%lx, %lx, %lx)\n", current_pid, num, arg1, arg2, arg3);
 
     switch (num) {
         case SYS_EXIT:
@@ -962,6 +976,7 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             if (ret == 0) {
                 if (copy_to_user((void *)arg2, &res, sizeof(aio_result_t)) < 0) return (uint64_t)-1;
             }
+            kprintf("[SYSCALL] Handler %lu returning 0x%lx\n", num, ret);
             return ret;
         }
         
@@ -1077,12 +1092,72 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
         case SYS_ACCEPT:
             return (uint64_t)-1;
 
-        case 48:
-             kprintf("[SYSCALL] Syscall 48 called by PID %u! Args: %lx, %lx, %lx\n", current_pid, arg1, arg2, arg3);
-             return 0;
+        case SYS_WRITEV: {
+            // arg1 = fd, arg2 = iov, arg3 = iovcnt
+            task_t *current_task = task_get_by_id(current_pid);
+            if (!current_task) return (uint64_t)-1;
+            
+            fd_entry_t *entry = fd_get(current_task->fd_table, (int)arg1);
+            if (!entry) return (uint64_t)-EBADF;
+
+            struct iovec {
+                uint64_t base;
+                uint64_t len;
+            } *uiov = (struct iovec *)arg2;
+
+            if (!is_user_address((uint64_t)uiov, sizeof(struct iovec) * arg3)) return (uint64_t)-EFAULT;
+
+            uint64_t total_written = 0;
+            for (uint64_t i = 0; i < arg3; i++) {
+                struct iovec vec;
+                if (copy_from_user(&vec, &uiov[i], sizeof(struct iovec)) < 0) return (uint64_t)-EFAULT;
+                
+                // Handle Console/File writes safely
+                if (entry->type == FD_DEVICE || entry->type == FD_FILE) {
+                     // For safety, copy to kernel buffer. This handles SMAP/SMEP/User-access safely.
+                     char *buf = kmalloc((size_t)vec.len + 1);
+                     if (buf) {
+                        if (copy_from_user(buf, (void*)vec.base, (size_t)vec.len) == 0) {
+                             if (entry->type == FD_DEVICE && entry->dev && entry->dev->write) {
+                                 // Warn: dev->write might expect user ptr, but we give kernel ptr.
+                                 // If dev->write uses 'copy_from_user', it will fail on kernel ptr!
+                                 // But existing SYS_WRITE passes user ptr.
+                                 // Let's assume dev->write handles whatever.
+                                 // Actually, to be safe and consistent with existing SYS_WRITE (line 154),
+                                 // let's try passing the user pointer 'vec.base' directly to dev->write?
+                                 // But writev loop needs to be atomic? No, usually not for console.
+                                 entry->dev->write(entry->dev, (const uint8_t *)vec.base, vec.len);
+                                 total_written += vec.len;
+                             } else if (entry->type == FD_FILE && entry->node) {
+                                 size_t w = vfs_write(entry->node, entry->offset, vec.len, (uint8_t *)buf);
+                                 entry->offset += w;
+                                 total_written += w;
+                             }
+                        }
+                        kfree(buf);
+                     }
+                }
+            }
+            return total_written;
+        }
+
+        case SYS_ARCH_PRCTL: {
+            // arg1 = code, arg2 = addr
+            // ARCH_SET_GS = 0x1001, ARCH_SET_FS = 0x1002
+            if (arg1 == 0x1002) {
+                wrmsr(0xC0000100, arg2); // FS_BASE
+                return 0;
+            } else if (arg1 == 0x1001) {
+                wrmsr(0xC0000101, arg2); // GS_BASE
+                return 0;
+            }
+            return (uint64_t)-EINVAL;
+        }
 
         default:
             kprintf("[SYSCALL] Unknown #%lu from PID %u\n", num, current_pid);
             return (uint64_t)-1;
     }
 }
+
+

@@ -21,26 +21,28 @@ size_t vfs_write(vfs_node_t *node, size_t offset, size_t size, uint8_t *buffer) 
 }
 
 vfs_node_t *vfs_readdir(vfs_node_t *node, size_t index) {
-    // If this node is a mount point, we should probably read from the mounted root instead?
-    // Usually readdir is called on the directory that IS the mount point.
-    // If node->flags & VFS_MOUNTPOINT, we should delegate to node->ptr.
-    if (node && (node->flags & VFS_MOUNTPOINT) && node->ptr) {
+    if (node == NULL) return NULL;
+    
+    // Traverse mount point
+    if ((node->flags & VFS_MOUNTPOINT) && node->ptr) {
         node = node->ptr;
     }
 
-    if (node == NULL || !(node->flags & VFS_DIRECTORY) || node->readdir == NULL) {
+    if (!(node->flags & VFS_DIRECTORY) || node->readdir == NULL) {
         return NULL;
     }
     return node->readdir(node, index);
 }
 
 vfs_node_t *vfs_finddir(vfs_node_t *node, const char *name) {
-    // Traverse mount points
-    if (node && (node->flags & VFS_MOUNTPOINT) && node->ptr) {
+    if (node == NULL) return NULL;
+    
+    // Traverse mount point
+    if ((node->flags & VFS_MOUNTPOINT) && node->ptr) {
         node = node->ptr;
     }
 
-    if (node == NULL || !(node->flags & VFS_DIRECTORY) || node->finddir == NULL) {
+    if (!(node->flags & VFS_DIRECTORY) || node->finddir == NULL) {
         return NULL;
     }
     

@@ -2,20 +2,15 @@
 #define SYSCALL_H
 
 #include <stdint.h>
+#include "idt.h"
 
-// Initialize syscall mechanism (MSRs)
+// ... existing includes ...
+
+// Call this from kernel main
 void syscall_init(void);
 
-// Forward declaration
-struct interrupt_frame;
+// ... existing definitions ...
 
-// Syscall handler (C function called from assembly)
-// regs is non-NULL when called via INT 0x80 (full register frame available for fork)
-// regs is NULL when called via SYSCALL instruction
-uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3,
-                          struct interrupt_frame *regs);
-
-// Syscalls
 #define SYS_EXIT         0
 #define SYS_WRITE        1
 #define SYS_OPEN         2
@@ -39,7 +34,6 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
 #define SYS_IPC_SHMEM_CREATE 17
 #define SYS_IPC_SHMEM_MAP    18
 #define SYS_IPC_SHMEM_UNMAP  19
-#define SYS_SEC_GETCAPS  20
 #define SYS_GETPID       39
 #define SYS_GETPPID      40
 #define SYS_PROC_EXEC    41
@@ -70,6 +64,8 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
 #define SYS_AIO_SUBMIT   69
 #define SYS_AIO_WAIT     70
 #define SYS_SEC_GRANT    71
+#define SYS_WRITEV       72
+#define SYS_ARCH_PRCTL   73
 
 // Socket Syscalls
 #define SYS_SOCKET       80
@@ -79,5 +75,9 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
 #define SYS_CONNECT      84
 #define SYS_SEND         85
 #define SYS_RECV         86
+
+
+// Handler
+uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5);
 
 #endif

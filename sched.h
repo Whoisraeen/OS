@@ -27,17 +27,24 @@ typedef enum {
     TASK_RUNNING,
     TASK_SLEEPING,
     TASK_BLOCKED,       // Blocked on mutex/semaphore/IPC
-    TASK_TERMINATED
+    TASK_TERMINATED,
+    TASK_ALLOCATING
 } task_state_t;
 
 // Forward declarations
 struct fd_table;
 struct mm_struct;
 
+typedef enum {
+    ABI_NATIVE = 0,
+    ABI_LINUX
+} abi_type_t;
+
 typedef struct task_t {
     uint32_t id;
     char name[32];
     task_state_t state;
+    abi_type_t abi;      // Process personality (Native vs Linux)
 
     uint64_t rsp;        // Kernel stack pointer (saved context)
     void *stack_base;    // Base of allocated kernel stack

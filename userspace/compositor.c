@@ -639,7 +639,17 @@ static void draw_window(comp_window_t *win) {
 
 void _start(void) {
     // 1. Get Framebuffer
-    if (syscall1(SYS_GET_FRAMEBUFFER, (uint64_t)&fb_info) != 0) {
+    // Retry loop to handle race condition where capabilities aren't granted yet
+    int retries = 10;
+    while (retries--) {
+        if (syscall1(SYS_GET_FRAMEBUFFER, (uint64_t)&fb_info) == 0) {
+            break;
+        }
+        syscall3(SYS_YIELD, 0, 0, 0); // Wait for Service Manager
+    }
+    
+    if (retries < 0) {
+        syscall3(SYS_WRITE, 1, (long)"[COMP] Failed to get framebuffer (Permission?)\n", 46);
         syscall1(SYS_EXIT, 1);
     }
     

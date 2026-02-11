@@ -1,5 +1,28 @@
 [BITS 64]
 
+global smp_ap_trampoline
+extern smp_ap_entry
+
+; AP Startup Trampoline
+; Limine jumps here with RDI = struct limine_smp_info *
+smp_ap_trampoline:
+    ; Load cpu_t * from extra_argument (offset 24)
+    mov rsi, [rdi + 24]
+    
+    ; Load RSP from cpu_t->startup_stack_top (offset 8)
+    mov rsp, [rsi + 8]
+    
+    ; Clear RBP for stack trace termination
+    xor rbp, rbp
+    
+    ; Jump to C entry point (RDI is still info)
+    call smp_ap_entry
+    
+    ; Should never return
+.halt:
+    hlt
+    jmp .halt
+
 global global_gdt_flush
 global tss_flush
 global jump_to_usermode
@@ -73,26 +96,40 @@ section .text
 syscall_entry:
     swapgs              ; Swap GS to Kernel GS (cpu_t)
 
-    ; Save User RSP to syscall_scratch (offset 8 in cpu_t)
-    mov gs:[8], rsp
+    ; Save User RSP to syscall_scratch (offset 16 in cpu_t)
+    mov gs:[16], rsp
 
-    ; Load Kernel RSP from TSS RSP0 (offset 84 in cpu_t)
-    mov rsp, gs:[84]
+    ; Load Kernel RSP from TSS RSP0 (offset 92 in cpu_t)
+    mov rsp, gs:[92]
 
-    ; Save User RFLAGS and RIP (RCX/R11 are clobbered by sysret, but we need to preserve them)
+    ; Save User RFLAGS and RIP (RCX/R11 are clobbered by sysret)
     push r11    ; Save User RFLAGS
     push rcx    ; Save User RIP
 
-    ; Switch to Kernel Segments
-    ; Switch to Kernel Segments
+    ; Save ALL user GPRs that the C handler might clobber
+    ; (Preserve them across the call so userspace sees them unchanged)
+    push rdi
+    push rsi
+    push rdx
+    push r8
+    push r9
+    push r10
     push rbx
-    mov bx, 0x10
-    mov ds, bx
-    mov es, bx
-    pop rbx
+    push rbp
+    push r12
+    push r13
+    push r14
+    push r15
+
+    ; Switch to Kernel Segments
+    push rax        ; save syscall number temporarily
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    pop rax         ; restore syscall number
     ; SS is already Kernel (handled by CPU)
 
-    ; Remap arguments for C function
+    ; Remap arguments for C function (syscall_handler(num, arg1, arg2, arg3, regs))
     mov rcx, rdx    ; 4th arg = User Arg3
     mov rdx, rsi    ; 3rd arg = User Arg2
     mov rsi, rdi    ; 2nd arg = User Arg1
@@ -101,16 +138,34 @@ syscall_entry:
 
     call syscall_handler
 
+    ; RAX now has return value — keep it
+
+    ; Restore ALL user GPRs
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    pop rbx
+    pop r10
+    pop r9
+    pop r8
+    pop rdx
+    pop rsi
+    pop rdi
+
     ; Restore User Segments
-    mov dx, 0x1B
-    mov ds, dx
-    mov es, dx
+    push rax
+    mov ax, 0x1B
+    mov ds, ax
+    mov es, ax
+    pop rax
 
     pop rcx     ; Restore User RIP
     pop r11     ; Restore User RFLAGS
 
-    ; Restore User Stack from syscall_scratch (offset 8 in cpu_t)
-    mov rsp, gs:[8]
+    ; Restore User Stack from syscall_scratch (offset 16 in cpu_t)
+    mov rsp, gs:[16]
 
     swapgs      ; Swap back to User GS
 

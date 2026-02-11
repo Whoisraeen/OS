@@ -1,42 +1,30 @@
-qemu-system-x86_64 -cdrom myos.iso -M q35 -serial stdio \
--drive id=disk,file=disk.img,if=none,format=raw \
--device ahci,id=ahci \
--device ide-hd,drive=disk,bus=ahci.0
-
-[KERNEL] GDT initialized.
-[VMM] Mapping HHDM: 0 - 0x100000000 (4096 MB)
-[HEAP] Initializing Linked List Heap...
-[ACPI] RSDP found: revision=0, OEM='6s'
-[ACPI] Using RSDT at 0x7fe22cb
-[ACPI] RSDT has 5 entries
-[ACPI]   Table: FACP at 0x7fe20c3 (len=244)
-[ACPI] FADT: PM1a_ctrl=0x604, SCI_INT=9
-[ACPI] FADT: century_reg=50, boot_flags=0x0
-[ACPI] DSDT at 0x7fe0040 (len=8323)
-[ACPI] S5 sleep type: 0x0 (direct)
-[ACPI]   Table: APIC at 0x7fe21b7 (len=120)
-[ACPI] MADT: LAPIC addr=0xfee00000, flags=0x1
-[ACPI]   LAPIC: proc=0 apic=0 enabled
-[ACPI]   IOAPIC: id=0 addr=0xfec00000 gsi_base=0
-[ACPI]   ISO: bus=0 source=IRQ0 -> GSI2 flags=0x0
-[ACPI]   ISO: bus=0 source=IRQ5 -> GSI5 flags=0xd
-[ACPI]   ISO: bus=0 source=IRQ9 -> GSI9 flags=0xd
-[ACPI]   ISO: bus=0 source=IRQ10 -> GSI10 flags=0xd
-[ACPI]   ISO: bus=0 source=IRQ11 -> GSI11 flags=0xd
-[ACPI]   NMI source
-[ACPI]   Table: HPET at 0x7fe222f (len=56)
-[ACPI]   Table: MCFG at 0x7fe2267 (len=60)
-[ACPI]   Table: WAET at 0x7fe22a3 (len=40)
-[SMP] Detected 1 CPUs
-[SMP] CPU 0 is BSP
-[LAPIC] Mapped 0xfee00000 -> 0xffff8000fee00000
-[LAPIC] Initialized on CPU. Base: 0xffff8000fee00000
-[SMP] Initialization complete. All cores waking up...
-[IOAPIC] ID=0, Version=0x20, Max IRQs=24
-[IOAPIC] PIC disabled, IOAPIC active
-[IOAPIC] Timer: IRQ0 -> GSI2 -> Vector 32
-[IOAPIC] Keyboard: IRQ1 -> GSI1 -> Vector 33
-[IOAPIC] Mouse: IRQ12 -> GSI12 -> Vector 44
-[TIMER] PIT initialized at 100 Hz
-[SCHED] SMP Scheduler Initialized (Per-CPU Queues).
-[LAPIC] Calibrating tiqemu-system-x86_64: terminating on signal 15 from pid 470 (killall)
+gcc -O2 -g -Wall -Wextra -Wpedantic -m64 -march=x86-64 -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=large -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-PIE -fno-pic -I. -Inet/include -c syscall.c -o syscall.o
+syscall.c: In function ‘tcp_recv_cb’:
+syscall.c:48:53: warning: unused parameter ‘pcb’ [-Wunused-parameter]
+   48 | static err_t tcp_recv_cb(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err) {
+      |                                     ~~~~~~~~~~~~~~~~^~~
+syscall.c: In function ‘syscall_handler’:
+syscall.c:1094:14: error: ‘SYS_WRITEV’ undeclared (first use in this function); did you mean ‘SYS_WRITE’?
+ 1094 |         case SYS_WRITEV: {
+      |              ^~~~~~~~~~
+      |              SYS_WRITE
+syscall.c:1094:14: note: each undeclared identifier is reported only once for each function it appears in
+syscall.c:1100:43: error: ‘EBADF’ undeclared (first use in this function)
+ 1100 |             if (!entry) return (uint64_t)-EBADF;
+      |                                           ^~~~~
+syscall.c:1107:98: error: ‘EFAULT’ undeclared (first use in this function)
+ 1107 |             if (!is_user_address((uint64_t)uiov, sizeof(struct iovec) * arg3)) return (uint64_t)-EFAULT;
+      |                                                                                                  ^~~~~~
+syscall.c:1143:14: error: ‘SYS_ARCH_PRCTL’ undeclared (first use in this function)
+ 1143 |         case SYS_ARCH_PRCTL: {
+      |              ^~~~~~~~~~~~~~
+syscall.c:1153:31: error: ‘EINVAL’ undeclared (first use in this function)
+ 1153 |             return (uint64_t)-EINVAL;
+      |                               ^~~~~~
+syscall.c:1149:23: warning: this statement may fall through [-Wimplicit-fallthrough=]
+ 1149 |             } else if (arg1 == 0x1001) {
+      |                       ^
+syscall.c:1156:9: note: here
+ 1156 |         default:
+      |         ^~~~~~~
+make: *** [Makefile:51: syscall.o] Error 1
