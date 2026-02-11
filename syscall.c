@@ -370,6 +370,25 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             vma_insert(task->mm, vma);
 
             // Pages are demand-allocated on first access (page fault handler)
+// Basic Error Codes
+#define EPERM   1
+#define ENOENT  2
+#define ESRCH   3
+#define EINTR   4
+#define EIO     5
+#define ENXIO   6
+#define E2BIG   7
+#define ENOEXEC 8
+#define EBADF   9
+#define ECHILD  10
+#define EAGAIN  11
+#define ENOMEM  12
+#define EACCES  13
+#define EFAULT  14
+#define EINVAL  22
+#define ENOSYS  38
+
+// Globals for drivers to access
             return addr;
         }
 
