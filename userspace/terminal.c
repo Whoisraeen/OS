@@ -1,487 +1,201 @@
-#include <stdint.h>
-#include <stddef.h>
+#include <SDL.h>
+#include <SDL_ttf.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include "syscalls.h"
-#include "font.h"
-#include "u_stdlib.h"
 
-// Directory entry structure
-typedef struct {
-    uint32_t d_ino;
-    uint16_t d_reclen;
-    uint8_t  d_type;
-    char     d_name[256];
-} dirent_t;
+#define WINDOW_WIDTH 800
+#define WINDOW_HEIGHT 600
+#define FONT_SIZE 16
+#define MAX_LINES 100
+#define VISIBLE_LINES 35
+#define MAX_COLS 100
 
-// ============================================================================
-// Utils
-// ============================================================================
-// Utils moved to u_stdlib.h
+SDL_Window *window = NULL;
+SDL_Renderer *renderer = NULL;
+TTF_Font *font = NULL;
 
+char lines[MAX_LINES][MAX_COLS];
+int line_count = 0;
+int scroll_offset = 0;
 
-// ============================================================================
-// GUI Definitions
-// ============================================================================
+char input_buffer[MAX_COLS];
+int input_len = 0;
 
-typedef struct {
-    uint32_t msg_id;
-    uint32_t sender_pid;
-    uint32_t reply_port;
-    uint32_t size;
-    uint64_t timestamp;
-    uint8_t data[128];
-} ipc_message_t;
+void terminal_print(const char *format, ...) {
+    char buffer[256];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
 
-typedef struct {
-    char title[64];
-    int x, y;
-    int w, h;
-    uint32_t shmem_id;
-    uint32_t reply_port;
-} msg_create_window_t;
-
-typedef struct {
-    uint32_t type; // 1=Key, 2=Mouse
-    uint32_t code;
-    int32_t x;
-    int32_t y;
-} msg_input_event_t;
-
-#define EVENT_KEY_DOWN 1
-
-// Colors
-#define BG_COLOR 0xFF000000 // Black
-#define FG_COLOR 0xFF00FF00 // Green
-
-// Terminal Config
-#define TERM_WIDTH  600
-#define TERM_HEIGHT 400
-#define ROWS (TERM_HEIGHT / FONT_HEIGHT)
-#define COLS (TERM_WIDTH / FONT_WIDTH)
-
-// State
-static char text_buffer[ROWS][COLS];
-static uint32_t color_buffer[ROWS][COLS];
-static int cursor_row = 0;
-static int cursor_col = 0;
-static uint32_t *win_buffer = NULL;
-static long comp_port = 0;
-static char cmd_buffer[256];
-static int cmd_len = 0;
-
-// ANSI State
-#define STATE_NORMAL 0
-#define STATE_ESC    1
-#define STATE_CSI    2
-
-static int term_state = STATE_NORMAL;
-static int term_params[4];
-static int term_param_count = 0;
-static uint32_t current_fg = FG_COLOR;
-static uint32_t current_bg = BG_COLOR;
-
-// ============================================================================
-// Drawing
-// ============================================================================
-
-static void put_pixel(int x, int y, uint32_t color) {
-    if (x < 0 || x >= TERM_WIDTH || y < 0 || y >= TERM_HEIGHT) return;
-    win_buffer[y * TERM_WIDTH + x] = color;
-}
-
-static void draw_char_pixel(int x, int y, char c, uint32_t color) {
-    if (c < 32 || c > 126) return;
-    int idx = c - 32;
-    for (int row = 0; row < FONT_HEIGHT; row++) {
-        uint8_t bits = font_data[idx][row];
-        for (int col = 0; col < FONT_WIDTH; col++) {
-            if (bits & (0x80 >> col)) {
-                put_pixel(x + col, y + row, color);
+    // Split by newline
+    char *line = strtok(buffer, "\n");
+    while (line) {
+        if (line_count < MAX_LINES) {
+            strncpy(lines[line_count], line, MAX_COLS - 1);
+            line_count++;
+        } else {
+            // Shift up
+            for (int i = 0; i < MAX_LINES - 1; i++) {
+                strncpy(lines[i], lines[i + 1], MAX_COLS);
             }
+            strncpy(lines[MAX_LINES - 1], line, MAX_COLS - 1);
         }
-    }
-}
-
-static void render_console() {
-    // Clear
-    for (int i = 0; i < TERM_WIDTH * TERM_HEIGHT; i++) {
-        win_buffer[i] = BG_COLOR;
+        line = strtok(NULL, "\n");
     }
     
-    // Draw Text
-    for (int r = 0; r < ROWS; r++) {
-        for (int c = 0; c < COLS; c++) {
-            char ch = text_buffer[r][c];
-            if (ch != 0) {
-                uint32_t color = color_buffer[r][c];
-                if (color == 0) color = FG_COLOR; // Default
-                draw_char_pixel(c * FONT_WIDTH, r * FONT_HEIGHT, ch, color);
-            }
-        }
-    }
-    
-    // Draw Cursor
-    int cx = cursor_col * FONT_WIDTH;
-    int cy = cursor_row * FONT_HEIGHT;
-    for (int r = 0; r < FONT_HEIGHT; r++) {
-        for (int c = 0; c < FONT_WIDTH; c++) {
-            put_pixel(cx + c, cy + r, current_fg);
-        }
+    // Auto scroll to bottom
+    if (line_count > VISIBLE_LINES) {
+        scroll_offset = line_count - VISIBLE_LINES;
     }
 }
 
-static void scroll_up() {
-    for (int r = 0; r < ROWS - 1; r++) {
-        for (int c = 0; c < COLS; c++) {
-            text_buffer[r][c] = text_buffer[r+1][c];
-            color_buffer[r][c] = color_buffer[r+1][c];
+void execute_command(char *cmd) {
+    terminal_print("$ %s\n", cmd);
+
+    if (strcmp(cmd, "help") == 0) {
+        terminal_print("Available commands:\n");
+        terminal_print("  help     - Show this help\n");
+        terminal_print("  clear    - Clear screen\n");
+        terminal_print("  ls       - List files\n");
+        terminal_print("  doom     - Launch Doom\n");
+        terminal_print("  shutdown - Power off\n");
+    } else if (strcmp(cmd, "clear") == 0) {
+        line_count = 0;
+        scroll_offset = 0;
+    } else if (strcmp(cmd, "shutdown") == 0) {
+        syscall0(SYS_SHUTDOWN);
+    } else if (strcmp(cmd, "doom") == 0) {
+        terminal_print("Launching Doom...\n");
+        syscall1(SYS_PROC_EXEC, (long)"doom.elf");
+    } else if (strcmp(cmd, "ls") == 0) {
+        DIR *d;
+        struct dirent *dir;
+        d = opendir(".");
+        if (d) {
+            while ((dir = readdir(d)) != NULL) {
+                terminal_print("%s\n", dir->d_name);
+            }
+            closedir(d);
+        } else {
+            terminal_print("Failed to open directory.\n");
         }
+    } else if (strlen(cmd) > 0) {
+        terminal_print("Unknown command: %s\n", cmd);
     }
-    for (int c = 0; c < COLS; c++) {
-        text_buffer[ROWS-1][c] = 0;
-        color_buffer[ROWS-1][c] = current_fg;
-    }
-    cursor_row = ROWS - 1;
 }
 
-static void handle_csi(char c) {
-    if (c >= '0' && c <= '9') {
-        term_params[term_param_count] = term_params[term_param_count] * 10 + (c - '0');
-    } else if (c == ';') {
-        if (term_param_count < 3) term_param_count++;
-    } else if (c == 'm') {
-        // SGR - Select Graphic Rendition
-        for (int i = 0; i <= term_param_count; i++) {
-            int code = term_params[i];
-            if (code == 0) {
-                current_fg = FG_COLOR;
-                current_bg = BG_COLOR;
-            } else if (code == 1) {
-                // Bold/Bright (just force white for now)
-                current_fg = 0xFFFFFFFF;
-            } else if (code >= 30 && code <= 37) {
-                // Basic Foreground Colors
-                uint32_t colors[] = {
-                    0xFF000000, // Black
-                    0xFFFF0000, // Red
-                    0xFF00FF00, // Green
-                    0xFFFFFF00, // Yellow
-                    0xFF0000FF, // Blue
-                    0xFFFF00FF, // Magenta
-                    0xFF00FFFF, // Cyan
-                    0xFFFFFFFF  // White
-                };
-                current_fg = colors[code - 30];
-            } else if (code >= 40 && code <= 47) {
-                // Basic Background Colors
-                uint32_t colors[] = {
-                    0xFF000000, // Black
-                    0xFFFF0000, // Red
-                    0xFF00FF00, // Green
-                    0xFFFFFF00, // Yellow
-                    0xFF0000FF, // Blue
-                    0xFFFF00FF, // Magenta
-                    0xFF00FFFF, // Cyan
-                    0xFFFFFFFF  // White
-                };
-                current_bg = colors[code - 40];
-            }
+int main(int argc, char *argv[]) {
+    (void)argc; (void)argv;
+
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        printf("SDL_Init failed: %s\n", SDL_GetError());
+        return 1;
+    }
+
+    if (TTF_Init() == -1) {
+        printf("TTF_Init failed: %s\n", TTF_GetError());
+        return 1;
+    }
+
+    window = SDL_CreateWindow("RaeenOS Terminal",
+                              SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                              WINDOW_WIDTH, WINDOW_HEIGHT,
+                              SDL_WINDOW_SHOWN);
+    if (!window) {
+        printf("Window creation failed: %s\n", SDL_GetError());
+        return 1;
+    }
+
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    if (!renderer) {
+        printf("Renderer creation failed: %s\n", SDL_GetError());
+        return 1;
+    }
+
+    font = TTF_OpenFont("FreeMono.ttf", FONT_SIZE);
+    if (!font) {
+        // Fallback to absolute path if needed, usually initrd root is /
+        font = TTF_OpenFont("/FreeMono.ttf", FONT_SIZE);
+        if (!font) {
+             printf("Failed to load font: %s\n", TTF_GetError());
+             return 1;
         }
-        term_state = STATE_NORMAL;
-    } else if (c == 'J') {
-        // Clear screen
-        if (term_params[0] == 2) {
-             for(int r=0; r<ROWS; r++) 
-                for(int col=0; col<COLS; col++) {
-                    text_buffer[r][col] = 0;
-                    color_buffer[r][col] = current_fg;
+    }
+
+    SDL_StartTextInput();
+    terminal_print("Welcome to RaeenOS Terminal!\nType 'help' for commands.\n");
+
+    int running = 1;
+    SDL_Event e;
+
+    while (running) {
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_QUIT) {
+                running = 0;
+            } else if (e.type == SDL_TEXTINPUT) {
+                if (input_len < MAX_COLS - 1) {
+                    strcat(input_buffer, e.text.text);
+                    input_len += strlen(e.text.text);
                 }
-             cursor_row = 0;
-             cursor_col = 0;
-        }
-        term_state = STATE_NORMAL;
-    } else if (c == 'K') {
-        // Erase Line
-        // 0 (default) = cursor to end, 1 = start to cursor, 2 = all
-        int mode = term_params[0];
-        if (mode == 0) {
-            for (int col = cursor_col; col < COLS; col++) {
-                text_buffer[cursor_row][col] = 0;
-                color_buffer[cursor_row][col] = current_fg;
-            }
-        } else if (mode == 1) {
-             for (int col = 0; col <= cursor_col; col++) {
-                text_buffer[cursor_row][col] = 0;
-                color_buffer[cursor_row][col] = current_fg;
-            }
-        } else if (mode == 2) {
-             for (int col = 0; col < COLS; col++) {
-                text_buffer[cursor_row][col] = 0;
-                color_buffer[cursor_row][col] = current_fg;
+            } else if (e.type == SDL_KEYDOWN) {
+                if (e.key.keysym.sym == SDLK_BACKSPACE && input_len > 0) {
+                    input_buffer[--input_len] = '\0';
+                } else if (e.key.keysym.sym == SDLK_RETURN) {
+                    execute_command(input_buffer);
+                    input_buffer[0] = '\0';
+                    input_len = 0;
+                }
             }
         }
-        term_state = STATE_NORMAL;
-    } else if (c == 'A') { // Cursor Up
-        int n = term_params[0]; if (n == 0) n = 1;
-        cursor_row -= n;
-        if (cursor_row < 0) cursor_row = 0;
-        term_state = STATE_NORMAL;
-    } else if (c == 'B') { // Cursor Down
-        int n = term_params[0]; if (n == 0) n = 1;
-        cursor_row += n;
-        if (cursor_row >= ROWS) cursor_row = ROWS - 1;
-        term_state = STATE_NORMAL;
-    } else if (c == 'C') { // Cursor Right
-        int n = term_params[0]; if (n == 0) n = 1;
-        cursor_col += n;
-        if (cursor_col >= COLS) cursor_col = COLS - 1;
-        term_state = STATE_NORMAL;
-    } else if (c == 'D') { // Cursor Left
-        int n = term_params[0]; if (n == 0) n = 1;
-        cursor_col -= n;
-        if (cursor_col < 0) cursor_col = 0;
-        term_state = STATE_NORMAL;
-    } else if (c == 'H' || c == 'f') { // Cursor Position
-        int row = term_params[0];
-        int col = term_params[1];
-        if (row > 0) row--; // 1-based to 0-based
-        if (col > 0) col--;
+
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_RenderClear(renderer);
+
+        SDL_Color textColor = {255, 255, 255, 255};
         
-        if (row >= ROWS) row = ROWS - 1;
-        if (col >= COLS) col = COLS - 1;
-        
-        cursor_row = row;
-        cursor_col = col;
-        term_state = STATE_NORMAL;
-    } else {
-        // Unknown or unsupported
-        term_state = STATE_NORMAL;
-    }
-}
+        int y = 0;
+        int start_line = scroll_offset;
+        int end_line = start_line + VISIBLE_LINES;
+        if (end_line > line_count) end_line = line_count;
 
-static void terminal_putc(char c) {
-    if (term_state == STATE_NORMAL) {
-        if (c == '\033') {
-            term_state = STATE_ESC;
-        } else if (c == '\n') {
-            cursor_col = 0;
-            cursor_row++;
-        } else if (c == '\b') {
-            if (cursor_col > 0) {
-                cursor_col--;
-                text_buffer[cursor_row][cursor_col] = 0;
-            } else if (cursor_row > 0) {
-                cursor_row--;
-                cursor_col = COLS - 1;
-                text_buffer[cursor_row][cursor_col] = 0;
-            }
-        } else {
-            text_buffer[cursor_row][cursor_col] = c;
-            color_buffer[cursor_row][cursor_col] = current_fg;
-            cursor_col++;
-            if (cursor_col >= COLS) {
-                cursor_col = 0;
-                cursor_row++;
+        for (int i = start_line; i < end_line; i++) {
+            SDL_Surface *surface = TTF_RenderText_Solid(font, lines[i], textColor);
+            if (surface) {
+                SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+                SDL_Rect dest = {10, y, surface->w, surface->h};
+                SDL_RenderCopy(renderer, texture, NULL, &dest);
+                SDL_FreeSurface(surface);
+                SDL_DestroyTexture(texture);
+                y += FONT_SIZE;
             }
         }
-    } else if (term_state == STATE_ESC) {
-        if (c == '[') {
-            term_state = STATE_CSI;
-            term_param_count = 0;
-            term_params[0] = 0;
-            term_params[1] = 0;
-            term_params[2] = 0;
-            term_params[3] = 0;
-        } else {
-            term_state = STATE_NORMAL;
+
+        // Render Input Line
+        char prompt[MAX_COLS + 5];
+        snprintf(prompt, sizeof(prompt), "$ %s_", input_buffer);
+        SDL_Surface *surface = TTF_RenderText_Solid(font, prompt, textColor);
+        if (surface) {
+            SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+            SDL_Rect dest = {10, y, surface->w, surface->h};
+            SDL_RenderCopy(renderer, texture, NULL, &dest);
+            SDL_FreeSurface(surface);
+            SDL_DestroyTexture(texture);
         }
-    } else if (term_state == STATE_CSI) {
-        handle_csi(c);
-    }
-    
-    if (cursor_row >= ROWS) {
-        scroll_up();
-    }
-}
 
-static void terminal_puts(const char *s) {
-    while (*s) terminal_putc(*s++);
-}
-
-// ============================================================================
-// Command Handling
-// ============================================================================
-
-static void handle_command(char *cmd) {
-    terminal_puts("\n");
-    if (cmd[0] == 0) return;
-
-    if (strncmp(cmd, "ls", 2) == 0) {
-        char *path = cmd + 2;
-        while (*path == ' ') path++;
-        if (*path == 0) path = "/"; // Default to root
-
-        terminal_puts("Listing: ");
-        terminal_puts(path);
-        terminal_puts("\n");
-
-        long fd = syscall2(SYS_OPEN, (long)path, 0); // O_RDONLY
-        if (fd < 0) {
-            terminal_puts("Failed to open directory.\n");
-        } else {
-            dirent_t entries[16];
-            while (1) {
-                long n = syscall3(SYS_GETDENTS, fd, (long)entries, 16);
-                if (n <= 0) break;
-                
-                for (int i = 0; i < n; i++) {
-                    terminal_puts("  ");
-                    terminal_puts(entries[i].d_name);
-                    terminal_puts("\n");
-                }
-            }
-            syscall1(SYS_CLOSE, fd);
-        }
-    } else if (strcmp(cmd, "help") == 0) {
-        terminal_puts("Available commands:\n");
-        terminal_puts("  ls [path] - List directory\n");
-        terminal_puts("  help      - Show this help\n");
-    } else {
-        terminal_puts("Unknown command: ");
-        terminal_puts(cmd);
-        terminal_puts("\n");
+        SDL_RenderPresent(renderer);
+        SDL_Delay(16);
     }
-}
 
-// ============================================================================
-// Main
-// ============================================================================
-
-void _start(void) {
-    // 1. Setup IPC Port
-    long my_port = syscall1(SYS_IPC_CREATE, IPC_PORT_FLAG_RECEIVE);
-    if (my_port <= 0) {
-        syscall1(SYS_EXIT, 1);
-    }
-    
-    // 2. Create Shared Memory for Window
-    size_t buf_size = TERM_WIDTH * TERM_HEIGHT * 4;
-    long shmem_id = syscall2(SYS_IPC_SHMEM_CREATE, buf_size, 0);
-    if (shmem_id <= 0) {
-        syscall1(SYS_EXIT, 1);
-    }
-    
-    win_buffer = (uint32_t *)syscall1(SYS_IPC_SHMEM_MAP, shmem_id);
-    if (!win_buffer) {
-        syscall1(SYS_EXIT, 1);
-    }
-    
-    // Initial Render
-    memset(text_buffer, 0, sizeof(text_buffer));
-    terminal_puts("RaeenOS Terminal v0.2\n");
-    terminal_puts("Filesystem mounted at /disk\n");
-    terminal_puts("Try 'ls /disk' to see installed files.\n");
-    terminal_puts("> ");
-    render_console();
-    
-    // 3. Connect to Compositor
-    comp_port = syscall1(SYS_IPC_LOOKUP, (long)"compositor");
-    while (comp_port <= 0) {
-        syscall3(SYS_YIELD, 0, 0, 0); // Wait for compositor
-        comp_port = syscall1(SYS_IPC_LOOKUP, (long)"compositor");
-    }
-    
-    // 4. Create Window
-    ipc_message_t msg;
-    msg.msg_id = 0; // Kernel overwrites?
-    msg.size = sizeof(msg_create_window_t);
-    
-    msg_create_window_t *req = (msg_create_window_t *)msg.data;
-    memcpy(req->title, "Terminal", 9);
-    req->x = 50;
-    req->y = 50;
-    req->w = TERM_WIDTH;
-    req->h = TERM_HEIGHT;
-    req->shmem_id = shmem_id;
-    req->reply_port = my_port;
-    
-    syscall3(SYS_IPC_SEND, comp_port, (long)&msg, 0);
-    
-    // 5. Event Loop
-    cmd_len = 0;
-    
-    for (;;) {
-        long res = syscall3(SYS_IPC_RECV, my_port, (long)&msg, 0); // Blocking
-        if (res == 0) {
-            // Check for Input Event
-            if (msg.size == sizeof(msg_input_event_t)) {
-                msg_input_event_t *evt = (msg_input_event_t *)msg.data;
-                if (evt->type == EVENT_KEY_DOWN) {
-                    // Simple ASCII mapping (Very basic)
-                    char c = 0;
-                    uint32_t sc = evt->code;
-                    
-                    // QWERTY map (partial)
-                    if (sc == 0x1C) c = '\n'; // Enter
-                    else if (sc == 0x0E) c = '\b'; // Backspace
-                    else if (sc == 0x39) c = ' '; // Space
-                    else if (sc == 0x35) c = '/'; // Slash
-                    else if (sc == 0x34) c = '.'; // Dot
-                    else if (sc >= 0x02 && sc <= 0x0B) {
-                        const char *nums = "1234567890";
-                        c = nums[sc - 0x02];
-                    }
-                    else if (sc >= 0x10 && sc <= 0x19) {
-                        const char *row1 = "qwertyuiop";
-                        c = row1[sc - 0x10];
-                    }
-                    else if (sc >= 0x1E && sc <= 0x26) {
-                        const char *row2 = "asdfghjkl";
-                        c = row2[sc - 0x1E];
-                    }
-                    else if (sc >= 0x2C && sc <= 0x32) {
-                        const char *row3 = "zxcvbnm";
-                        c = row3[sc - 0x2C];
-                    }
-                    
-                    if (c != 0) {
-                        terminal_putc(c);
-                        
-                        if (c == '\n') {
-                            cmd_buffer[cmd_len] = 0;
-                            handle_command(cmd_buffer);
-                            cmd_len = 0;
-                            terminal_puts("> ");
-                        } else if (c == '\b') {
-                            if (cmd_len > 0) cmd_len--;
-                        } else {
-                            if (cmd_len < 255) cmd_buffer[cmd_len++] = c;
-                        }
-                        
-                        render_console();
-                        
-                        // Notify Compositor to Redraw
-                        ipc_message_t inv;
-                        inv.size = 0; // Empty message = Invalidate
-                        syscall3(SYS_IPC_SEND, comp_port, (long)&inv, 0);
-                    }
-                } else if (evt->type == 4) { // EVENT_MOUSE_DOWN
-                    // Click to move cursor
-                    int col = evt->x / FONT_WIDTH;
-                    int row = evt->y / FONT_HEIGHT;
-                    
-                    if (col >= 0 && col < COLS && row >= 0 && row < ROWS) {
-                        cursor_col = col;
-                        cursor_row = row;
-                        render_console();
-                        
-                        ipc_message_t inv;
-                        inv.size = 0;
-                        syscall3(SYS_IPC_SEND, comp_port, (long)&inv, 0);
-                    }
-                }
-            }
-        }
-    }
-    
-    syscall1(SYS_EXIT, 0);
+    TTF_CloseFont(font);
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    TTF_Quit();
+    SDL_Quit();
+    return 0;
 }

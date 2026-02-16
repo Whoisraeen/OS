@@ -31,6 +31,9 @@
 #define MSR_STAR     0xC0000081
 #define MSR_LSTAR    0xC0000082
 #define MSR_FMASK    0xC0000084
+#define MSR_FS_BASE  0xC0000100
+#define MSR_GS_BASE  0xC0000101
+#define MSR_KERNEL_GS_BASE 0xC0000102
 
 // EFER bits
 #define EFER_SCE 0x01  // System Call Enable
@@ -45,17 +48,8 @@
 // External assembly handler
 extern void syscall_entry(void);
 
-// External Linux handler
+// External Linux handler (unused for now)
 extern uint64_t linux_syscall_handler(struct interrupt_frame *regs);
-
-// Forward declaration if vmm.h fails
-// int copy_from_user(void *kernel_dst, const void *user_src, size_t size);
-
-static int local_copy_from_user(void *kernel_dst, const void *user_src, size_t size) {
-    if (!is_user_address((uint64_t)user_src, size)) return -1;
-    memcpy(kernel_dst, user_src, size);
-    return 0;
-}
 
 void syscall_init(void) {
     uint64_t efer = rdmsr(MSR_EFER);
@@ -76,36 +70,33 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
     }
 
     // Mapping for convenience
+    // Linux ABI: RDI, RSI, RDX, R10, R8, R9
     uint64_t arg1 = regs->rdi;
     uint64_t arg2 = regs->rsi;
     uint64_t arg3 = regs->rdx;
+    uint64_t arg4 = regs->r10;
+    uint64_t arg5 = regs->r8; 
+    uint64_t arg6 = regs->r9;
 
-    if (num != 16) { // SYS_GET_INPUT_EVENT
+    (void)arg4; (void)arg5; (void)arg6;
+
+    if (num != SYS_GET_INPUT_EVENT && num != SYS_WRITE && num != SYS_SCHED_YIELD && num != SYS_POLL) {
         kprintf("[SYSCALL] PID %u called #%lu (arg1=%lx, arg2=%lx, arg3=%lx) at RIP %lx\n", 
                 current_pid, num, arg1, arg2, arg3, regs->rip);
     }
 
-    // uint64_t arg4 = regs->rcx; // Note: syscall instruction clobbers RCX with RIP!
-    // But our synthesized frame in interrupts.S puts User RCX into regs->rcx.
-
     switch (num) {
-        case SYS_EXIT:
+        case SYS_EXIT: // 60
             security_destroy_context(current_pid);
             task_exit_code((int)arg1);
             return 0;
 
-        case SYS_WRITE: {
-            if (current_pid == 2) kprintf("[SYSCALL] PID 2 SYS_WRITE len=%lu\n", arg3);
-
-            if (!is_user_address(arg2, arg3)) return (uint64_t)-EFAULT;
-            
-            // Limit write size to avoid large allocations
+        case SYS_WRITE: { // 1
             if (arg3 > 1024 * 1024) arg3 = 1024 * 1024;
-            
             void *kbuf = kmalloc((size_t)arg3);
             if (!kbuf) return (uint64_t)-ENOMEM;
             
-            if (local_copy_from_user(kbuf, (void*)arg2, (size_t)arg3) < 0) {
+            if (copy_from_user(kbuf, (void*)arg2, (size_t)arg3) < 0) {
                 kfree(kbuf);
                 return (uint64_t)-EFAULT;
             }
@@ -122,16 +113,13 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
                  }
             }
             kfree(kbuf);
-            if ((int64_t)ret < 0) {
-                 kprintf("[SYSCALL] SYS_WRITE ret=%ld\n", (int64_t)ret);
-            }
             return ret;
         }
 
-        case SYS_READ: {
-            if (!is_user_address(arg2, arg3)) return (uint64_t)-1;
+        case SYS_READ: { // 0
+            if (!is_user_address(arg2, arg3)) return (uint64_t)-EFAULT;
             fd_entry_t *entry = fd_get(current_task->fd_table, (int)arg1);
-            if (!entry) return (uint64_t)-1;
+            if (!entry) return (uint64_t)-EBADF;
             if (entry->type == FD_DEVICE && entry->dev->read)
                 return entry->dev->read(entry->dev, (uint8_t *)arg2, arg3);
             if (entry->type == FD_FILE && entry->node) {
@@ -141,11 +129,11 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             return (uint64_t)-1;
         }
 
-        case SYS_OPEN: {
+        case SYS_OPEN: { // 2
             char path[256];
-            if (copy_string_from_user(path, (const char *)arg1, sizeof(path)) < 0) return (uint64_t)-1;
+            if (copy_string_from_user(path, (const char *)arg1, sizeof(path)) < 0) return (uint64_t)-EFAULT;
             vfs_node_t *node = vfs_open(path, (int)arg2);
-            if (!node) return (uint64_t)-1;
+            if (!node) return (uint64_t)-ENOENT;
             int fd = fd_alloc(current_task->fd_table);
             if (fd < 0) return (uint64_t)-1;
             fd_entry_t *entry = &current_task->fd_table->entries[fd];
@@ -154,12 +142,16 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             return (uint64_t)fd;
         }
 
-        case SYS_CLOSE: {
+        case SYS_CLOSE: { // 3
             fd_free(current_task->fd_table, (int)arg1);
             return 0;
         }
 
-        case SYS_BRK: {
+        case SYS_POLL: // 7
+            // Stub for now
+            return 0;
+
+        case SYS_BRK: { // 12
             if (!current_task->mm) return (uint64_t)-1;
             if (arg1 == 0) return current_task->mm->brk;
             uint64_t new_brk = (arg1 + 0xFFF) & ~0xFFFULL;
@@ -173,22 +165,32 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             return new_brk;
         }
 
-        case SYS_FORK: {
+        case SYS_FORK: // 57
             return (uint64_t)task_fork((registers_t *)regs);
-        }
+            
+        case SYS_CLONE: // 56
+            return (uint64_t)task_fork((registers_t *)regs);
 
-        case SYS_YIELD:
+        case SYS_SCHED_YIELD: // 24
             task_yield();
             return 0;
-
-
-        case SYS_IPC_CREATE: {
-            return (uint64_t)ipc_port_create(current_pid, (uint32_t)arg1);
+            
+        case SYS_WAIT4: { // 61
+            int status = 0;
+            int child_pid = task_wait(&status);
+            if (child_pid > 0 && arg2) {
+                if (copy_to_user((void*)arg2, &status, sizeof(int)) < 0) return (uint64_t)-EFAULT;
+            }
+            return (uint64_t)child_pid;
         }
+
+        // Custom IPC Syscalls (500+)
+        case SYS_IPC_CREATE:
+            return (uint64_t)ipc_port_create(current_pid, (uint32_t)arg1);
 
         case SYS_IPC_SEND: {
             ipc_message_t kmsg;
-            if (local_copy_from_user(&kmsg, (void*)arg2, sizeof(ipc_message_t)) < 0) return (uint64_t)-EFAULT;
+            if (copy_from_user(&kmsg, (void*)arg2, sizeof(ipc_message_t)) < 0) return (uint64_t)-EFAULT;
             return (uint64_t)ipc_send_message((ipc_port_t)arg1, &kmsg, current_pid, (uint32_t)arg3, 0);
         }
 
@@ -213,59 +215,49 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             return (uint64_t)ipc_port_register((ipc_port_t)arg1, name);
         }
 
-        case SYS_IPC_SHMEM_CREATE: {
+        case SYS_IPC_SHMEM_CREATE:
             return (uint64_t)ipc_shmem_create((size_t)arg1, current_pid, (uint32_t)arg2);
-        }
 
-        case SYS_IPC_SHMEM_MAP: {
+        case SYS_IPC_SHMEM_MAP:
             return (uint64_t)ipc_shmem_map((uint32_t)arg1, current_pid);
-        }
 
-        case SYS_IPC_SHMEM_UNMAP: {
+        case SYS_IPC_SHMEM_UNMAP:
             return (uint64_t)ipc_shmem_unmap((uint32_t)arg1, current_pid);
-        }
 
-        case SYS_IRQ_WAIT: {
+        case SYS_IRQ_WAIT: { // 518
             if (!security_has_capability(current_pid, CAP_HW_INPUT)) return (uint64_t)-1;
             irq_register_waiter((int)arg1, current_task);
             task_block();
             return 0;
         }
 
-        case SYS_IRQ_ACK: {
+        case SYS_IRQ_ACK: { // 519
             if (!security_has_capability(current_pid, CAP_HW_INPUT)) return (uint64_t)-1;
-            // For now, identity map IRQ to PIC/IOAPIC EOI logic if needed
-            // But usually the kernel handles EOI, drivers just need to clear hardware state
             return 0;
         }
 
-        case SYS_CLOCK_GETTIME: {
+        case SYS_CLOCK_GETTIME: { // 228
             uint64_t ts[2];
             ts[0] = rtc_get_timestamp();
             ts[1] = 0; // nsec
-            if (copy_to_user((void*)arg1, ts, sizeof(ts)) < 0) return (uint64_t)-1;
+            if (copy_to_user((void*)arg1, ts, sizeof(ts)) < 0) return (uint64_t)-EFAULT;
             return 0;
         }
 
-        case SYS_SHUTDOWN: {
+        case SYS_SHUTDOWN: { // 48
             if (!security_has_capability(current_pid, CAP_SYS_REBOOT)) return (uint64_t)-1;
             kprintf("[SYSCALL] Powering off...\n");
-            // ACPI shutdown or QEMU debug exit
             outw(0x604, 0x2000); // QEMU/VirtualBox
             return 0;
         }
 
-        case SYS_GETDENTS: {
-            // arg1=fd, arg2=buf, arg3=count
+        case SYS_GETDENTS64: { // 217
             fd_entry_t *entry = fd_get(current_task->fd_table, (int)arg1);
-            if (!entry || entry->type != FD_FILE || !(entry->node->flags & VFS_DIRECTORY)) return (uint64_t)-1;
+            if (!entry || entry->type != FD_FILE || !(entry->node->flags & VFS_DIRECTORY)) return (uint64_t)-EBADF;
             
-            // Simplified: return one entry at a time for now to keep it easy
-            // We use entry->offset as the index
             vfs_node_t *node = vfs_readdir(entry->node, entry->offset);
             if (!node) return 0; // EOF
             
-            // linux-style dirent64 (simplified)
             struct {
                 uint64_t d_ino;
                 int64_t  d_off;
@@ -278,14 +270,14 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             de.d_off = entry->offset + 1;
             de.d_type = (node->flags & VFS_DIRECTORY) ? 4 : 8; // DT_DIR : DT_REG
             strncpy(de.d_name, node->name, 255);
-            de.d_reclen = sizeof(de); // Fix later for variable size
+            de.d_reclen = sizeof(de);
             
-            if (copy_to_user((void*)arg2, &de, sizeof(de)) < 0) return (uint64_t)-1;
+            if (copy_to_user((void*)arg2, &de, sizeof(de)) < 0) return (uint64_t)-EFAULT;
             entry->offset++;
             return (uint64_t)sizeof(de);
         }
 
-        case SYS_IOPORT: {
+        case SYS_IOPORT: { // 517
             if (!security_has_capability(current_pid, CAP_HW_INPUT)) return (uint64_t)-1;
             uint16_t port = (uint16_t)arg1;
             uint16_t val = (uint16_t)arg2;
@@ -300,16 +292,16 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             }
         }
 
-        case SYS_PROC_EXEC: {
+        case SYS_PROC_EXEC: { // 512
             char path[256];
-            if (copy_string_from_user(path, (const char *)arg1, sizeof(path)) < 0) return (uint64_t)-1;
+            if (copy_string_from_user(path, (const char *)arg1, sizeof(path)) < 0) return (uint64_t)-EFAULT;
             vfs_node_t *node = vfs_open(path, 0);
             if (!node) {
                 kprintf("[SYSCALL] SYS_PROC_EXEC: Failed to open %s\n", path);
-                return (uint64_t)-1;
+                return (uint64_t)-ENOENT;
             }
             uint8_t *buf = kmalloc(node->length);
-            if (!buf) return (uint64_t)-1;
+            if (!buf) return (uint64_t)-ENOMEM;
             vfs_read(node, 0, node->length, buf);
             kprintf("[SYSCALL] SYS_PROC_EXEC: Loading %s (%lu bytes)\n", path, node->length);
             int slot = task_create_user(path, buf, node->length, current_pid, ABI_NATIVE);
@@ -317,9 +309,9 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             return (uint64_t)slot;
         }
 
-        case SYS_STAT: {
+        case SYS_STAT: { // 4
             char path[256];
-            if (copy_string_from_user(path, (const char *)arg1, sizeof(path)) < 0) return (uint64_t)-1;
+            if (copy_string_from_user(path, (const char *)arg1, sizeof(path)) < 0) return (uint64_t)-EFAULT;
             vfs_node_t *node = vfs_open(path, 0);
             if (!node) return (uint64_t)-ENOENT;
 
@@ -332,29 +324,17 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             memset(&kst, 0, sizeof(kst));
             kst.st_ino = node->inode;
             kst.st_size = node->length;
-            kst.st_mode = (node->flags & VFS_DIRECTORY) ? 0040000 : 0100000; // S_IFDIR : S_IFREG
-            kst.st_mode |= 0755; // Default permissions
+            kst.st_mode = (node->flags & VFS_DIRECTORY) ? 0040000 : 0100000;
+            kst.st_mode |= 0755;
 
             if (copy_to_user((void*)arg2, &kst, sizeof(kst)) < 0) return (uint64_t)-EFAULT;
             return 0;
         }
 
-        case SYS_WAIT: {
-            int status = 0;
-            int child_pid = task_wait(&status);
-            if (child_pid > 0 && arg1) {
-                if (copy_to_user((void*)arg1, &status, sizeof(int)) < 0) return (uint64_t)-1;
-            }
-            return (uint64_t)child_pid;
-        }
+        case SYS_SEC_GRANT: // 511
+            return (uint64_t)security_grant_capability(current_pid, (uint32_t)arg1, arg2);
 
-        case SYS_SEC_GRANT: {
-            uint32_t target_pid = (uint32_t)arg1;
-            uint64_t caps = arg2;
-            return (uint64_t)security_grant_capability(current_pid, target_pid, caps);
-        }
-
-        case SYS_GET_FRAMEBUFFER: {
+        case SYS_GET_FRAMEBUFFER: { // 505
             if (!security_has_capability(current_pid, CAP_HW_VIDEO)) return (uint64_t)-1;
             console_set_enabled(0);
             
@@ -366,28 +346,20 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             uint64_t fb_size = fb_width * fb_height * 4;
             fb_size = (fb_size + 4095) & ~4095;
             
-            // Determine physical address (logic from vmm_init)
             uint64_t fb_virt_kernel = (uint64_t)fb_ptr;
             uint64_t fb_phys;
-            
-            // We need kernel_addr_request.response to check kernel range
-            // For now, assume it's either in Kernel or HHDM
-            // Most likely HHDM if it's large.
             if (fb_virt_kernel >= 0xffffffff80000000ULL) {
-                // Kernel range (rough estimate)
-                fb_phys = fb_virt_kernel - 0xffffffff80000000ULL; // Just a guess without the response struct
-                // Actually, let's use the HHDM offset if it's in higher half but not kernel range
+                fb_phys = fb_virt_kernel - 0xffffffff80000000ULL; 
             } else {
                 fb_phys = fb_virt_kernel - vmm_get_hhdm_offset();
             }
             
-            // Map the pages to user space
             for (uint64_t off = 0; off < fb_size; off += 4096) {
                 vmm_map_user_page(fb_user_base + off, fb_phys + off);
             }
             
             typedef struct { uint64_t addr, width, height, pitch; uint32_t bpp; } fb_info_t;
-            if (!is_user_address(arg1, sizeof(fb_info_t))) return (uint64_t)-1;
+            if (!is_user_address(arg1, sizeof(fb_info_t))) return (uint64_t)-EFAULT;
             
             fb_info_t *info = (fb_info_t *)arg1;
             info->addr = fb_user_base; 
@@ -399,28 +371,26 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             return 0;
         }
 
-        case SYS_GET_INPUT_EVENT: {
+        case SYS_GET_INPUT_EVENT: { // 506
             typedef struct {
-                uint32_t type; // 1=Key, 2=Mouse
-                uint32_t code; // Keycode or Buttons
-                int32_t x;     // Mouse X
-                int32_t y;     // Mouse Y
+                uint32_t type; 
+                uint32_t code; 
+                int32_t x;     
+                int32_t y;     
             } input_event_t;
 
             input_event_t *uevt = (input_event_t *)arg1;
-            if (!is_user_address(arg1, sizeof(input_event_t))) return (uint64_t)-1;
+            if (!is_user_address(arg1, sizeof(input_event_t))) return (uint64_t)-EFAULT;
 
             uint32_t type, code, buttons;
             int32_t x, y;
 
-            // Check mouse first
             if (get_mouse_event(&type, &buttons, &x, &y)) {
                 input_event_t kevt = { .type = type, .code = buttons, .x = x, .y = y };
                 copy_to_user(uevt, &kevt, sizeof(input_event_t));
                 return 1;
             }
 
-            // Then keyboard
             if (get_keyboard_event(&type, &code)) {
                 input_event_t kevt = { .type = type, .code = code, .x = 0, .y = 0 };
                 copy_to_user(uevt, &kevt, sizeof(input_event_t));
@@ -428,6 +398,37 @@ uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs) {
             }
 
             return 0;
+        }
+
+        case SYS_ARCH_PRCTL: { // 158
+            uint32_t code = (uint32_t)arg1;
+            uint64_t addr = arg2;
+
+            if (code == 0x1002) { // ARCH_SET_FS
+                if (!is_user_address(addr, 8)) return (uint64_t)-EFAULT;
+                current_task->tls_base = addr;
+                wrmsr(MSR_FS_BASE, addr);
+                return 0;
+            } 
+            else if (code == 0x1001) { // ARCH_SET_GS
+                if (!is_user_address(addr, 8)) return (uint64_t)-EFAULT;
+                wrmsr(MSR_KERNEL_GS_BASE, addr);
+                return 0;
+            }
+            else if (code == 0x1003) { // ARCH_GET_FS
+                 if (!is_user_address(addr, 8)) return (uint64_t)-EFAULT;
+                 uint64_t fs_base = rdmsr(MSR_FS_BASE);
+                 copy_to_user((void*)addr, &fs_base, sizeof(uint64_t));
+                 return 0;
+            }
+            else if (code == 0x1004) { // ARCH_GET_GS
+                 if (!is_user_address(addr, 8)) return (uint64_t)-EFAULT;
+                 uint64_t gs_base = rdmsr(MSR_KERNEL_GS_BASE);
+                 copy_to_user((void*)addr, &gs_base, sizeof(uint64_t));
+                 return 0;
+            }
+            
+            return (uint64_t)-EINVAL;
         }
 
         default:

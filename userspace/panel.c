@@ -74,7 +74,8 @@ static void update_clock() {
     }
 }
 
-void _start(void) {
+int main(int argc, char **argv) {
+    (void)argc; (void)argv;
     gui_init();
     
     // We need comp_port for invalidation in manual loop
@@ -105,4 +106,5 @@ void _start(void) {
         // uint64_t now = syscall0(SYS_CLOCK_GETTIME); // returns ticks/time?
         update_clock();
     }
+    return 0;
 }

@@ -7,6 +7,8 @@ LD = ld
 MUSL_DIR = userspace/musl
 MUSL_INC = -I$(MUSL_DIR)/include -I$(MUSL_DIR)/obj/include -I$(MUSL_DIR)/arch/x86_64 -I$(MUSL_DIR)/arch/generic
 MUSL_LIB = $(MUSL_DIR)/lib/libc.a
+CRT_START = $(MUSL_DIR)/lib/crt1.o $(MUSL_DIR)/lib/crti.o
+CRT_END = $(MUSL_DIR)/lib/crtn.o
 
 # Flags
 CFLAGS = -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding \
@@ -24,11 +26,15 @@ all: $(APPS)
 
 initrd/panel.elf: userspace/panel.c userspace/lib/gui.c $(MUSL_LIB)
 	mkdir -p initrd
-	$(CC) $(CFLAGS) userspace/panel.c userspace/lib/gui.c $(MUSL_LIB) -o $@ $(LDFLAGS)
+	$(CC) $(CFLAGS) $(CRT_START) userspace/panel.c userspace/lib/gui.c $(MUSL_LIB) -o $@ $(LDFLAGS) $(CRT_END)
+
+initrd/terminal.elf: userspace/terminal.c $(MUSL_LIB)
+	mkdir -p initrd
+	$(CC) $(CFLAGS) -Iuserspace/build/include/SDL2 -Iuserspace/build/include/freetype2 $(CRT_START) $< -o $@ $(LDFLAGS) -Luserspace/build/lib -lSDL2_ttf -lfreetype -lSDL2 $(MUSL_LIB) $(CRT_END)
 
 initrd/%.elf: userspace/%.c $(MUSL_LIB)
 	mkdir -p initrd
-	$(CC) $(CFLAGS) $< $(MUSL_LIB) -o $@ $(LDFLAGS)
+	$(CC) $(CFLAGS) $(CRT_START) $< $(MUSL_LIB) -o $@ $(LDFLAGS) $(CRT_END)
 
 $(MUSL_LIB):
 	cd $(MUSL_DIR) && ./configure --disable-shared && $(MAKE) -j4

@@ -37,7 +37,8 @@ static uint32_t inet_addr(const char *cp) {
     return addr;
 }
 
-void _start(void) {
+int main(int argc, char **argv) {
+    (void)argc; (void)argv;
     const char *url = "gemini://raeenos.org/";
     const char *hostname = "raeenos.org";
     const char *ip_str = "127.0.0.1"; // Default gateway/local test

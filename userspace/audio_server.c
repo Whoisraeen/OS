@@ -16,7 +16,8 @@ static int _getpid(void) {
 // Manages audio mixing and output to the kernel HDA driver via IPC or shared memory
 // For now, it's a stub that registers itself as the "audio" service.
 
-void _start(void) {
+int main(int argc, char **argv) {
+    (void)argc; (void)argv;
     // main(0, NULL);
     // Inline main logic for _start
     
@@ -45,6 +46,6 @@ void _start(void) {
         
         // Handle play request, set volume, etc.
         
-        syscall1(SYS_YIELD, 0);
+        syscall0(SYS_SCHED_YIELD);
     }
 }

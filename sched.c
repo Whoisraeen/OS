@@ -285,15 +285,35 @@ int task_create_user(const char *name, const void *elf_data, size_t size, uint32
     }
     
     if (stack_ok) {
-        // Initialize Stack (argc=0, argv=NULL, envp=NULL)
+        // Initialize Stack (argc=0, argv=NULL, envp=NULL, auxv=NULL)
+        // We leave some padding at the very top of the stack page to avoid
+        // hitting the unmapped page boundary immediately.
         if (last_stack_phys) {
             uint64_t *stack_page = (uint64_t *)(last_stack_phys + vmm_get_hhdm_offset());
-            stack_page[511] = 0; // envp
-            stack_page[510] = 0; // argv
-            stack_page[509] = 0; // argc
+            
+            // Layout (growing down):
+            // [511] = 0 (Padding)
+            // [510] = 0 (Padding)
+            // [509] = 0 (auxv[0].val)
+            // [508] = 0 (auxv[0].type = AT_NULL)
+            // [507] = 0 (envp terminator)
+            // [506] = 0 (argv terminator)
+            // [505] = 0 (argc)
+            
+            stack_page[511] = 0;
+            stack_page[510] = 0;
+            stack_page[509] = 0; // auxv val
+            stack_page[508] = 0; // auxv type
+            stack_page[507] = 0; // envp
+            stack_page[506] = 0; // argv
+            stack_page[505] = 0; // argc
             
             // Adjust RSP
-            user_stack_top -= 24; 
+            // Base of page + 505*8 = address of argc
+            // user_stack_top points to Base + 512*8 (end of page)
+            // We want RSP to point to stack_page[505]
+            // Difference = (512 - 505) * 8 = 7 * 8 = 56 bytes.
+            user_stack_top -= 56; 
         }
     }
 
@@ -557,10 +577,10 @@ uint64_t scheduler_switch(registers_t *regs) {
         }
     }
 
-    // 6. Switch TLS base (FS segment) if set
-    if (next->tls_base) {
-        wrmsr(MSR_FS_BASE, next->tls_base);
-    }
+    // 6. Switch TLS base (FS segment)
+    // Always write MSR_FS_BASE to ensure we don't leak the previous task's TLS
+    // or use a stale value if the new task has no TLS (tls_base=0).
+    wrmsr(MSR_FS_BASE, next->tls_base);
 
     spinlock_release(&cpu->lock);
     return next->rsp;

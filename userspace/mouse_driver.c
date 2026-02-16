@@ -51,7 +51,8 @@ static uint8_t mouse_read(void) {
     return syscall3(SYS_IOPORT, MOUSE_DATA_PORT, 0, 0);
 }
 
-void _start(void) {
+int main(int argc, char **argv) {
+    (void)argc; (void)argv;
     syscall3(SYS_WRITE, 1, (long)"[MOUSE] Driver Started\n", 23);
 
     // 1. Create IPC Port

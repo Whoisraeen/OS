@@ -39,7 +39,7 @@ void gui_init(void) {
         comp_port = syscall1(SYS_IPC_LOOKUP, (long)"compositor");
         if (comp_port <= 0) {
              // Yield and retry
-             syscall3(SYS_YIELD, 0, 0, 0);
+             syscall0(SYS_SCHED_YIELD);
              for(volatile int i=0; i<1000000; i++);
         }
     }

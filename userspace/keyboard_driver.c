@@ -12,7 +12,8 @@
 // Status bits
 #define STATUS_OUTPUT_FULL 0x01
 
-void _start(void) {
+int main(int argc, char **argv) {
+    (void)argc; (void)argv;
     syscall3(SYS_WRITE, 1, (long)"[KBD] Keyboard Driver Started\n", 30);
     
     // 1. Create IPC Port

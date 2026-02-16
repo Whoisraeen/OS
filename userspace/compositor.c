@@ -684,7 +684,8 @@ static void draw_window(comp_window_t *win) {
 // Main Compositor Loop
 // ============================================================================
 
-void _start(void) {
+int main(int argc, char **argv) {
+    (void)argc; (void)argv;
     // 1. Get Framebuffer
     // Retry loop to handle race condition where capabilities aren't granted yet
     // Increase retries significantly to ensure Service Manager has time to grant caps
@@ -693,7 +694,7 @@ void _start(void) {
         if (syscall1(SYS_GET_FRAMEBUFFER, (uint64_t)&fb_info) == 0) {
             break;
         }
-        syscall3(SYS_YIELD, 0, 0, 0); // Yield to let Service Manager run
+        syscall0(SYS_SCHED_YIELD); // Yield to let Service Manager run
         for (volatile int i = 0; i < 100000; i++); // Small delay
     }
     
@@ -831,7 +832,7 @@ void _start(void) {
             reset_dirty();
         }
         
-        syscall3(SYS_YIELD, 0, 0, 0);
+        syscall0(SYS_SCHED_YIELD);
     }
     
     syscall1(SYS_EXIT, 0);

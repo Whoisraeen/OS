@@ -91,7 +91,7 @@ int main(void) {
         
         // Busy wait / yield
         for (volatile int j = 0; j < 100000; j++); 
-        syscall3(SYS_YIELD, 0, 0, 0);
+        syscall3(SYS_SCHED_YIELD, 0, 0, 0);
     }
     
     // Spawn Drivers & Panel
@@ -216,7 +216,7 @@ int main(void) {
                         }
                     }
                     
-                    syscall3(SYS_YIELD, 0, 0, 0);
+                    syscall3(SYS_SCHED_YIELD, 0, 0, 0);
                 }
                 
             } else {
@@ -232,7 +232,7 @@ int main(void) {
     
     // Fallback loop if something failed
     for (;;) {
-        syscall3(SYS_YIELD, 0, 0, 0);
+        syscall3(SYS_SCHED_YIELD, 0, 0, 0);
     }
     
     return 0;

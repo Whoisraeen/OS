@@ -54,33 +54,8 @@ $(KERNEL_BIN): $(OBJS)
 %.o: %.S
 	nasm -felf64 $< -o $@
 
-initrd/init.elf: userspace/init.c userspace/linker.ld
-	mkdir -p initrd
-	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -Iuserspace -Iuserspace/libc -T userspace/linker.ld userspace/init.c -o initrd/init.elf
-
-initrd/compositor.elf: userspace/compositor.c userspace/linker.ld
-	mkdir -p initrd
-	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/compositor.c -o initrd/compositor.elf
-
-initrd/service_manager.elf: userspace/service_manager.c userspace/linker.ld
-	mkdir -p initrd
-	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/service_manager.c -o initrd/service_manager.elf
-
-initrd/keyboard_driver.elf: userspace/keyboard_driver.c userspace/linker.ld
-	mkdir -p initrd
-	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/keyboard_driver.c -o initrd/keyboard_driver.elf
-
-initrd/mouse_driver.elf: userspace/mouse_driver.c userspace/linker.ld
-	mkdir -p initrd
-	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/mouse_driver.c -o initrd/mouse_driver.elf
-
-initrd/terminal.elf: userspace/terminal.c userspace/linker.ld
-	mkdir -p initrd
-	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/terminal.c -o initrd/terminal.elf
-
-initrd/audio_server.elf: userspace/audio_server.c userspace/linker.ld
-	mkdir -p initrd
-	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/audio_server.c -o initrd/audio_server.elf
+initrd/init.elf initrd/compositor.elf initrd/service_manager.elf initrd/keyboard_driver.elf initrd/mouse_driver.elf initrd/terminal.elf initrd/panel.elf initrd/audio_server.elf:
+	$(MAKE) -f userspace/Makefile.musl $@
 
 initrd/gemini.elf: userspace/gemini.c userspace/lib/tls.c userspace/lib/tlse/tlse.c userspace/linker.ld
 	mkdir -p initrd
@@ -96,11 +71,20 @@ initrd/test_driver.o: drivers/test_driver.c
 userspace/libc/syscalls.o: userspace/libc/syscalls.c
 	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -Iuserspace -Iuserspace/libc -c userspace/libc/syscalls.c -o userspace/libc/syscalls.o
 
-initrd/panel.elf: userspace/panel.c userspace/lib/gui.c userspace/linker.ld
-	mkdir -p initrd
-	$(CC) -O2 -g -Wall -Wextra -m64 -march=x86-64 -ffreestanding -fno-stack-protector -fno-PIE -no-pie -fno-pic -nostdlib -T userspace/linker.ld userspace/panel.c userspace/lib/gui.c font.c -o initrd/panel.elf
 
-initrd.tar: initrd/init.elf initrd/compositor.elf initrd/service_manager.elf initrd/keyboard_driver.elf initrd/mouse_driver.elf initrd/terminal.elf initrd/panel.elf initrd/audio_server.elf initrd/test_driver.o
+
+initrd/doom.elf:
+	$(MAKE) -C ports/doomgeneric/doomgeneric -f Makefile.raeenos
+
+initrd/FreeMono.ttf: assets/FreeMono.ttf
+	mkdir -p initrd
+	cp assets/FreeMono.ttf initrd/FreeMono.ttf
+
+initrd/doom1.wad: assets/doom1.wad
+	mkdir -p initrd
+	cp assets/doom1.wad initrd/doom1.wad
+
+initrd.tar: initrd/init.elf initrd/compositor.elf initrd/service_manager.elf initrd/keyboard_driver.elf initrd/mouse_driver.elf initrd/terminal.elf initrd/panel.elf initrd/audio_server.elf initrd/test_driver.o initrd/doom.elf initrd/FreeMono.ttf initrd/doom1.wad
 	tar -cvf initrd.tar -C initrd .
 
 $(ISO_IMAGE): $(KERNEL_BIN) limine initrd.tar

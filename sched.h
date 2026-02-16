@@ -9,7 +9,7 @@
 
 // User-space memory layout constants
 #define USER_STACK_TOP   0x7FFFFFFFF000ULL
-#define USER_STACK_SIZE  (16 * 1024)
+#define USER_STACK_SIZE  (1024 * 1024) // 1MB Stack
 
 // CPU Registration State (what is pushed by ISR)
 // Note: This must match the stack layout in interrupts.S

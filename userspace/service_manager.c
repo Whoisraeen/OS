@@ -13,7 +13,8 @@
 
 // Utils moved to u_stdlib.h
 
-void _start(void) {
+int main(int argc, char **argv) {
+    (void)argc; (void)argv;
     // Debug: Simple loop to verify we reached user mode
     // syscall3(SYS_WRITE, 1, (long)"[SM] ALIVE\n", 12);
     
@@ -71,7 +72,8 @@ void _start(void) {
     // 5. Wait loop (Prevent exit)
     while (1) {
         int status;
-        long pid = syscall1(SYS_WAIT, (long)&status);
+        // wait4(pid, status, options, rusage)
+        long pid = syscall4(SYS_WAIT4, -1, (long)&status, 0, 0);
         if (pid > 0) {
             // Restart critical services
             if (pid == comp_pid) {

@@ -56,7 +56,6 @@ void serial_init(void) {
 }
 
 void serial_putc(char c) {
-    klog_putc(c); // Capture to ring buffer
     if (!serial_present) return;
     while (!serial_is_transmit_empty());
     outb(COM1_PORT, c);
@@ -69,6 +68,13 @@ void serial_puts(const char *str) {
         }
         serial_putc(*str++);
     }
+}
+
+// Helper to write to all outputs
+static void putc_all(char c) {
+    klog_putc(c);
+    serial_putc(c);
+    console_putc(c);
 }
 
 // Simple number to string conversion
@@ -88,19 +94,13 @@ static void print_num(uint64_t num, int base, int width, char pad) {
     
     // Pad
     while (i < width) {
-        char c = pad;
-        klog_putc(c);
-        serial_putc(c);
-        console_putc(c);
+        putc_all(pad);
         width--;
     }
     
     // Print in reverse
     while (i > 0) {
-        char c = buf[--i];
-        klog_putc(c);
-        serial_putc(c);
-        console_putc(c);
+        putc_all(buf[--i]);
     }
 }
 
@@ -137,9 +137,7 @@ void kprintf(const char *fmt, ...) {
                 case 'i': {
                     int val = va_arg(args, int);
                     if (val < 0) {
-                        klog_putc('-');
-                        serial_putc('-');
-                        console_putc('-');
+                        putc_all('-');
                         val = -val;
                     }
                     print_num((uint64_t)val, 10, width, pad);
@@ -166,9 +164,7 @@ void kprintf(const char *fmt, ...) {
                     } else if (*fmt == 'd') {
                          long val = va_arg(args, long);
                          if (val < 0) {
-                            klog_putc('-');
-                            serial_putc('-');
-                            console_putc('-');
+                            putc_all('-');
                             val = -val;
                         }
                         print_num((uint64_t)val, 10, width, pad);
@@ -179,39 +175,29 @@ void kprintf(const char *fmt, ...) {
                     const char *s = va_arg(args, const char *);
                     if (!s) s = "(null)";
                     while (*s) {
-                        klog_putc(*s);
-                        serial_putc(*s);
-                        console_putc(*s);
+                        putc_all(*s);
                         s++;
                     }
                     break;
                 }
                 case 'c': {
                     int c = va_arg(args, int);
-                    klog_putc((char)c);
-                    serial_putc((char)c);
-                    console_putc((char)c);
+                    putc_all((char)c);
                     break;
                 }
                 case 'p': {
                     void *ptr = va_arg(args, void *);
-                    klog_putc('0'); klog_putc('x');
-                    serial_putc('0'); serial_putc('x');
-                    console_putc('0'); console_putc('x');
+                    putc_all('0'); putc_all('x');
                     print_num((uint64_t)ptr, 16, 0, ' ');
                     break;
                 }
                 case '%': {
-                    klog_putc('%');
-                    serial_putc('%');
-                    console_putc('%');
+                    putc_all('%');
                     break;
                 }
             }
         } else {
-            klog_putc(*fmt);
-            serial_putc(*fmt);
-            console_putc(*fmt);
+            putc_all(*fmt);
         }
         fmt++;
     }
