@@ -42,6 +42,9 @@ int futex_op(uint64_t *addr, int op, uint32_t val) {
     uint64_t cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
 
+    /* FUTEX_PRIVATE means process-local — treat identically for our single-kernel impl */
+    op &= ~FUTEX_PRIVATE_FLAG;
+
     switch (op) {
         case FUTEX_WAIT: {
             spinlock_acquire(&futex_lock);

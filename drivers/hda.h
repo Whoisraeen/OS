@@ -85,6 +85,9 @@
 #define HDA_PARAM_GPIO_COUNT    0x11
 #define HDA_PARAM_VOL_KNOB_CAP  0x13
 
-void hda_init(void);
+void     hda_init(void);
+int      hda_write_audio(const void *pcm, int len);  // write 48kHz/16b/stereo PCM; returns bytes written
+uint32_t hda_ring_free(void);                        // bytes available in ring buffer
+void     hda_set_volume(int vol_pct);                // 0–100
 
 #endif

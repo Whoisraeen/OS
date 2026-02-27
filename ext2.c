@@ -1083,6 +1083,10 @@ static vfs_node_t *ext2_vfs_readdir(vfs_node_t *node, size_t index);
 static vfs_node_t *ext2_vfs_finddir(vfs_node_t *node, const char *name);
 static vfs_node_t *ext2_vfs_create(vfs_node_t *parent, const char *name, int flags);
 static int ext2_vfs_mkdir(vfs_node_t *parent, const char *name);
+static int ext2_vfs_unlink(vfs_node_t *parent, const char *name);
+static int ext2_vfs_rmdir(vfs_node_t *parent, const char *name);
+static int ext2_vfs_rename(vfs_node_t *old_parent, const char *old_name,
+                            vfs_node_t *new_parent, const char *new_name);
 
 static vfs_node_t *ext2_create_vfs_node(ext2_fs_t *fs, uint32_t ino) {
     ext2_inode_t inode;
@@ -1108,7 +1112,10 @@ static vfs_node_t *ext2_create_vfs_node(ext2_fs_t *fs, uint32_t ino) {
         node->readdir = ext2_vfs_readdir;
         node->finddir = ext2_vfs_finddir;
         node->create = ext2_vfs_create;
-        node->mkdir = ext2_vfs_mkdir;
+        node->mkdir  = ext2_vfs_mkdir;
+        node->unlink = ext2_vfs_unlink;
+        node->rmdir  = ext2_vfs_rmdir;
+        node->rename = ext2_vfs_rename;
     } else {
         node->flags = VFS_FILE;
     }
@@ -1230,6 +1237,27 @@ static int ext2_vfs_mkdir(vfs_node_t *parent, const char *name) {
     
     uint32_t ino = ext2_create(ctx->fs, ctx->ino, name, EXT2_S_IFDIR | 0755);
     return (ino != 0) ? 0 : -1;
+}
+
+static int ext2_vfs_unlink(vfs_node_t *parent, const char *name) {
+    ext2_vfs_ctx_t *ctx = (ext2_vfs_ctx_t *)parent->impl;
+    if (!ctx) return -1;
+    return ext2_unlink(ctx->fs, ctx->ino, name);
+}
+
+static int ext2_vfs_rmdir(vfs_node_t *parent, const char *name) {
+    ext2_vfs_ctx_t *ctx = (ext2_vfs_ctx_t *)parent->impl;
+    if (!ctx) return -1;
+    return ext2_rmdir(ctx->fs, ctx->ino, name);
+}
+
+static int ext2_vfs_rename(vfs_node_t *old_parent, const char *old_name,
+                            vfs_node_t *new_parent, const char *new_name) {
+    ext2_vfs_ctx_t *old_ctx = (ext2_vfs_ctx_t *)old_parent->impl;
+    ext2_vfs_ctx_t *new_ctx = (ext2_vfs_ctx_t *)new_parent->impl;
+    if (!old_ctx || !new_ctx) return -1;
+    return ext2_rename(old_ctx->fs, old_ctx->ino, old_name,
+                       new_ctx->ino, new_name);
 }
 
 // ============================================================

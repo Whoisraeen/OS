@@ -17,4 +17,8 @@ void serial_puts(const char *str);
 // Formatted print to serial
 void kprintf(const char *fmt, ...);
 
+// Formatted print to buffer (like snprintf)
+// Returns number of bytes written (not counting NUL), or -1 on error.
+int ksnprintf(char *buf, size_t size, const char *fmt, ...);
+
 #endif

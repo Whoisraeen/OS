@@ -14,6 +14,8 @@ void *pmm_alloc_pages(size_t count);
 void pmm_free_page(void *ptr);
 void pmm_free_pages(void *ptr, size_t count);
 uint64_t pmm_get_hhdm_offset(void);
+uint64_t pmm_get_total_pages(void);
+uint64_t pmm_get_free_pages(void);
 
 // Reference counting for COW (copy-on-write) support
 void pmm_page_ref(void *phys);          // Increment reference count

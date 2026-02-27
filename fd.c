@@ -3,14 +3,13 @@
 #include "console.h"
 #include "serial.h"
 #include "string.h"
+#include "keyboard.h"
 
 // --- Console device operations ---
 
 static size_t console_dev_read(fd_device_ops_t *dev, uint8_t *buf, size_t count) {
     (void)dev;
-    (void)buf;
-    (void)count;
-    return 0; // No keyboard input via fd yet
+    return keyboard_read_ascii(buf, count);
 }
 
 static size_t console_dev_write(fd_device_ops_t *dev, const uint8_t *buf, size_t count) {

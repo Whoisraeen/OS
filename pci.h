@@ -100,4 +100,7 @@ pci_device_t *pci_get_device(int index);
 // Returns 0 on success, -1 on failure
 int pci_enable_msi(pci_device_t *dev, uint8_t vector, uint8_t processor);
 
+// Find a PCI capability by ID
+int pci_find_capability(pci_device_t *dev, uint8_t cap_id);
+
 #endif

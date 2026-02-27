@@ -42,7 +42,7 @@ void on_doom_click(gui_widget_t *w, void *data) {
 
 void on_shutdown_click(gui_widget_t *w, void *data) {
     (void)w; (void)data;
-    syscall0(SYS_SHUTDOWN);
+    syscall0(SYS_REBOOT);
 }
 
 static void update_clock() {

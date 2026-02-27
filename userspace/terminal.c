@@ -69,7 +69,7 @@ void execute_command(char *cmd) {
         line_count = 0;
         scroll_offset = 0;
     } else if (strcmp(cmd, "shutdown") == 0) {
-        syscall0(SYS_SHUTDOWN);
+        syscall0(SYS_REBOOT);
     } else if (strcmp(cmd, "doom") == 0) {
         terminal_print("Launching Doom...\n");
         syscall1(SYS_PROC_EXEC, (long)"doom.elf");

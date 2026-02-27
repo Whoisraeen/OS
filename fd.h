@@ -13,16 +13,20 @@ typedef enum {
     FD_FILE,
     FD_PIPE,
     FD_SOCKET,
-    FD_DEVICE
+    FD_DEVICE,
+    FD_PTY_MASTER,   // pseudoterminal master (terminal emulator side)
+    FD_PTY_SLAVE     // pseudoterminal slave  (program's tty)
 } fd_type_t;
 
-// Open flags
-#define O_RDONLY  0x0000
-#define O_WRONLY  0x0001
-#define O_RDWR   0x0002
-#define O_CREAT  0x0040
-#define O_TRUNC  0x0200
-#define O_APPEND 0x0400
+// Open flags (match Linux x86-64 values)
+#define O_RDONLY   0x0000
+#define O_WRONLY   0x0001
+#define O_RDWR     0x0002
+#define O_CREAT    0x0040
+#define O_TRUNC    0x0200
+#define O_APPEND   0x0400
+#define O_NONBLOCK 0x0800
+#define O_CLOEXEC  0x80000
 
 // Seek whence
 #define SEEK_SET  0
@@ -40,11 +44,12 @@ typedef struct {
     fd_type_t type;
     uint32_t flags;
     size_t offset;          // Current file position (FD_FILE)
+    char dir_path[256];     // Absolute path (populated for directory fds, for fchdir)
     union {
         vfs_node_t *node;       // FD_FILE
         fd_device_ops_t *dev;   // FD_DEVICE
-        void *pipe;             // FD_PIPE (future)
-        void *socket;           // FD_SOCKET (future)
+        void *pipe;             // FD_PIPE / FD_PTY_MASTER / FD_PTY_SLAVE
+        void *socket;           // FD_SOCKET
     };
 } fd_entry_t;
 

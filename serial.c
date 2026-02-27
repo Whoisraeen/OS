@@ -77,6 +77,69 @@ static void putc_all(char c) {
     console_putc(c);
 }
 
+// ── ksnprintf helpers ─────────────────────────────────────────────────────────
+typedef struct {
+    char   *buf;
+    size_t  size;
+    size_t  pos;
+} snbuf_t;
+
+static void sn_putc(snbuf_t *s, char c) {
+    if (s->pos + 1 < s->size) {
+        s->buf[s->pos++] = c;
+        s->buf[s->pos]   = '\0';
+    }
+}
+
+static void sn_num(snbuf_t *s, uint64_t num, int base, int width, char pad) {
+    char tmp[32];
+    int i = 0;
+    if (num == 0) { tmp[i++] = '0'; }
+    else { while (num > 0) { int d = (int)(num % base); tmp[i++] = d < 10 ? '0'+d : 'a'+d-10; num /= base; } }
+    while (i < width) { sn_putc(s, pad); width--; }
+    while (i > 0) sn_putc(s, tmp[--i]);
+}
+
+int ksnprintf(char *buf, size_t size, const char *fmt, ...) {
+    if (!buf || size == 0) return -1;
+    buf[0] = '\0';
+
+    snbuf_t s = { buf, size, 0 };
+    va_list args;
+    va_start(args, fmt);
+
+    while (*fmt) {
+        if (*fmt != '%') { sn_putc(&s, *fmt++); continue; }
+        fmt++;
+        char pad = ' '; int width = 0;
+        if (*fmt == '0') { pad = '0'; fmt++; }
+        while (*fmt >= '0' && *fmt <= '9') { width = width*10 + (*fmt-'0'); fmt++; }
+
+        switch (*fmt) {
+            case 'd': case 'i': { int v = va_arg(args, int); if (v<0){sn_putc(&s,'-');v=-v;} sn_num(&s,(uint64_t)v,10,width,pad); break; }
+            case 'u': { unsigned v = va_arg(args, unsigned); sn_num(&s,(uint64_t)v,10,width,pad); break; }
+            case 'x': { unsigned v = va_arg(args, unsigned); sn_num(&s,(uint64_t)v,16,width,pad); break; }
+            case 'l': {
+                fmt++;
+                if (*fmt == 'x') { unsigned long v = va_arg(args, unsigned long); sn_num(&s,(uint64_t)v,16,width,pad); }
+                else if (*fmt == 'u') { unsigned long v = va_arg(args, unsigned long); sn_num(&s,(uint64_t)v,10,width,pad); }
+                else if (*fmt == 'd') { long v = va_arg(args, long); if(v<0){sn_putc(&s,'-');v=-v;} sn_num(&s,(uint64_t)v,10,width,pad); }
+                break;
+            }
+            case 's': { const char *str = va_arg(args, const char *); if(!str) str="(null)"; while(*str) sn_putc(&s,*str++); break; }
+            case 'c': { int c = va_arg(args, int); sn_putc(&s,(char)c); break; }
+            case 'p': { void *ptr = va_arg(args, void *); sn_putc(&s,'0'); sn_putc(&s,'x'); sn_num(&s,(uint64_t)ptr,16,0,' '); break; }
+            case '%': sn_putc(&s,'%'); break;
+        }
+        fmt++;
+    }
+
+    va_end(args);
+    return (int)s.pos;
+}
+
+// ── kprintf ───────────────────────────────────────────────────────────────────
+
 // Simple number to string conversion
 static void print_num(uint64_t num, int base, int width, char pad) {
     char buf[32];

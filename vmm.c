@@ -566,25 +566,35 @@ bool is_user_address(uint64_t addr, size_t size) {
 
 int copy_from_user(void *kernel_dst, const void *user_src, size_t size) {
     if (!is_user_address((uint64_t)user_src, size)) return -1;
+    __asm__ volatile("stac" ::: "memory");
     memcpy(kernel_dst, user_src, size);
+    __asm__ volatile("clac" ::: "memory");
     return 0;
 }
 
 int copy_to_user(void *user_dst, const void *kernel_src, size_t size) {
     if (!is_user_address((uint64_t)user_dst, size)) return -1;
+    __asm__ volatile("stac" ::: "memory");
     memcpy(user_dst, kernel_src, size);
+    __asm__ volatile("clac" ::: "memory");
     return 0;
 }
 
 int copy_string_from_user(char *kernel_dst, const char *user_src, size_t max_len) {
     if (!is_user_address((uint64_t)user_src, 1)) return -1;
-
+    __asm__ volatile("stac" ::: "memory");
     for (size_t i = 0; i < max_len - 1; i++) {
-        // Validate each byte as we go (string might cross into kernel space)
-        if (!is_user_address((uint64_t)&user_src[i], 1)) return -1;
+        if (!is_user_address((uint64_t)&user_src[i], 1)) {
+            __asm__ volatile("clac" ::: "memory");
+            return -1;
+        }
         kernel_dst[i] = user_src[i];
-        if (user_src[i] == '\0') return (int)i;
+        if (user_src[i] == '\0') {
+            __asm__ volatile("clac" ::: "memory");
+            return (int)i;
+        }
     }
+    __asm__ volatile("clac" ::: "memory");
     kernel_dst[max_len - 1] = '\0';
     return (int)(max_len - 1);
 }

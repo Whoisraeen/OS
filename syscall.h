@@ -27,7 +27,7 @@ void syscall_init(void);
 #define SYS_RT_SIGACTION 13
 #define SYS_RT_SIGPROCMASK 14
 #define SYS_RT_SIGRETURN 15
-#define SYS_IOCTL        16
+#define SYS_IOCTL        16   // ioctl(fd, request, arg)
 #define SYS_PREAD64      17
 #define SYS_PWRITE64     18
 #define SYS_READV        19
@@ -112,7 +112,9 @@ void syscall_init(void);
 #define SYS_GETRUSAGE    98
 #define SYS_SYSINFO      99
 #define SYS_TIMES        100
+#define SYS_GETPPID      110
 #define SYS_ARCH_PRCTL   158
+#define SYS_REBOOT       169
 #define SYS_FUTEX        202
 #define SYS_GETDENTS64   217
 #define SYS_CLOCK_GETTIME 228
@@ -139,11 +141,16 @@ void syscall_init(void);
 #define SYS_IOPORT           517
 #define SYS_IRQ_WAIT         518
 #define SYS_IRQ_ACK          519
-#define SYS_MAP_PHYS         520
-#define SYS_AIO_SUBMIT       521
-#define SYS_AIO_WAIT         522
+#define SYS_GPU_UPDATE       520
+#define SYS_MAP_PHYS         521
+#define SYS_AIO_SUBMIT       522
+#define SYS_AIO_WAIT         523
+#define SYS_AUDIO_WRITE      524   // (buf, len) → bytes written
+#define SYS_AUDIO_AVAIL      525   // () → free ring bytes
+#define SYS_AUDIO_SET_VOL    526   // (vol_pct 0-100)
 
 // Handler
 uint64_t syscall_handler(uint64_t num, struct interrupt_frame *regs);
+uint64_t native_syscall_handler(uint64_t num, struct interrupt_frame *regs);
 
 #endif

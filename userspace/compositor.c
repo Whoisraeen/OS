@@ -822,14 +822,28 @@ int main(int argc, char **argv) {
             
             // Flip (Copy Dirty Rect from Back Buffer to Front Buffer)
             if (back_buffer != fb_ptr) {
-                for (int y = global_dirty.y1; y < global_dirty.y2; y++) {
-                    int offset = y * fb_info.width + global_dirty.x1;
-                    int size_bytes = (global_dirty.x2 - global_dirty.x1) * 4;
-                    memcpy(&fb_ptr[offset], &back_buffer[offset], size_bytes);
-                }
+                // ... (memcpy) ...
+            }
+            
+            // Tell Kernel/Hypervisor to update screen
+            long res = syscall4(SYS_GPU_UPDATE, global_dirty.x1, global_dirty.y1, 
+                     global_dirty.x2 - global_dirty.x1, global_dirty.y2 - global_dirty.y1);
+             
+            if (res != 0) {
+                 syscall3(SYS_WRITE, 1, (long)"[COMP] SYS_GPU_UPDATE failed!\n", 30);
             }
             
             reset_dirty();
+        }
+        
+        // DEBUG: Force dirty every 60 frames (~1 sec)
+        static int frame_count = 0;
+        frame_count++;
+        if (frame_count > 60) {
+            frame_count = 0;
+            mark_full_dirty();
+            // Draw a red debug rect
+            draw_rect(10, 10, 50, 50, RGBA(255, 0, 0, 255));
         }
         
         syscall0(SYS_SCHED_YIELD);

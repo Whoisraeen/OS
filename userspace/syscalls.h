@@ -52,7 +52,8 @@
 #define SYS_RECVFROM     45
 #define SYS_SENDMSG      46
 #define SYS_RECVMSG      47
-#define SYS_SHUTDOWN     48
+#define SYS_SHUTDOWN     48   // socket shutdown
+#define SYS_REBOOT       169  // system power-off/reboot
 #define SYS_BIND         49
 #define SYS_LISTEN       50
 #define SYS_GETSOCKNAME  51
@@ -132,9 +133,10 @@
 #define SYS_IOPORT           517
 #define SYS_IRQ_WAIT         518
 #define SYS_IRQ_ACK          519
-#define SYS_MAP_PHYS         520
-#define SYS_AIO_SUBMIT       521
-#define SYS_AIO_WAIT         522
+#define SYS_GPU_UPDATE       520
+#define SYS_MAP_PHYS         521
+#define SYS_AIO_SUBMIT       522
+#define SYS_AIO_WAIT         523
 
 // IPC Constants
 #define IPC_PORT_FLAG_RECEIVE (1 << 1)

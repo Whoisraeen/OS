@@ -34,4 +34,7 @@ size_t pipe_write(pipe_t *pipe, const uint8_t *buf, size_t count);
 // Close a pipe end. type: 0 = read end, 1 = write end.
 void pipe_close(pipe_t *pipe, int is_write_end);
 
+// Non-blocking: bytes available to read (includes EOF detection)
+size_t pipe_bytes_available(pipe_t *pipe);
+
 #endif

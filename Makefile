@@ -26,10 +26,14 @@ LDFLAGS = -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -T linker.ld
 SRCS = kernel.c gdt.c idt.c pic.c keyboard.c pmm.c vmm.c heap.c serial.c \
        console.c vfs.c initrd.c syscall.c user.c shell.c timer.c sched.c \
        mouse.c desktop.c speaker.c compositor.c elf.c ipc.c security.c \
-       spinlock.c cpu.c lapic.c mutex.c semaphore.c fd.c pipe.c signal.c \
+       spinlock.c cpu.c lapic.c mutex.c semaphore.c fd.c pipe.c pty.c signal.c \
        futex.c vm_area.c acpi.c ioapic.c rtc.c driver.c pci.c dma.c \
-       devfs.c ahci.c bga.c block.c partition.c bcache.c ext2.c klog.c ksyms.c \
-       aio.c drivers/e1000.c drivers/hda.c drivers/usb/xhci.c drivers/nvme.c net/sys_arch.c net/core/pbuf.c \
+       devfs.c procfs.c ahci.c bga.c block.c partition.c bcache.c ext2.c klog.c ksyms.c \
+       aio.c drivers/e1000.c drivers/hda.c drivers/usb/xhci.c \
+       drivers/usb/hid_gamepad.c drivers/nvme.c \
+       drivers/gpu/amdgpu.c \
+       drivers/virtio/virtio.c drivers/virtio/gpu.c \
+       net/socket.c net/sys_arch.c net/core/pbuf.c \
        net/core/netif.c net/core/ip.c net/core/tcp.c net/core/arp.c \
        compat/linux/linux_syscall.c
 
@@ -113,7 +117,8 @@ run: $(ISO_IMAGE) disk.img
 	qemu-system-x86_64 -cdrom $(ISO_IMAGE) -M q35 -serial file:serial.log \
 	-drive id=disk,file=disk.img,if=none,format=raw \
 	-device ahci,id=ahci \
-	-device ide-hd,drive=disk,bus=ahci.0
+	-device ide-hd,drive=disk,bus=ahci.0 \
+	-device virtio-gpu-pci,disable-modern=on
 
 disk.img:
 	dd if=/dev/zero of=disk.img bs=1M count=64

@@ -99,4 +99,21 @@ typedef struct {
     uint8_t interval;
 } __attribute__((packed)) usb_endpoint_descriptor_t;
 
+// USB Device Structure
+typedef struct usb_device {
+    uint8_t bus;            // USB Bus Number (Controller ID)
+    uint8_t addr;           // USB Device Address
+    uint8_t port;           // Parent Port
+    uint8_t speed;          // Device Speed
+    uint16_t vid;           // Vendor ID
+    uint16_t pid;           // Product ID
+    void *hci_priv;         // Host Controller Private Data (e.g. Slot ID for XHCI)
+    struct usb_device *parent; // Parent Hub (NULL for Root)
+} usb_device_t;
+
+// Host Controller Driver API
+int usb_control_msg(usb_device_t *dev, uint8_t request_type, uint8_t request, uint16_t value, uint16_t index, void *data, uint16_t len);
+int usb_bulk_msg(usb_device_t *dev, uint8_t endpoint, void *data, int len);
+int usb_interrupt_msg(usb_device_t *dev, uint8_t endpoint, void *data, int len);
+
 #endif // USB_H

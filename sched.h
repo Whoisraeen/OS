@@ -58,7 +58,8 @@ typedef struct task_t {
 
     // Process relationships
     uint32_t parent_pid;    // Parent process ID (0 = kernel)
-    int32_t exit_code;      // Exit code (valid when TASK_TERMINATED)
+    int32_t  exit_code;     // Exit code (valid when TASK_TERMINATED)
+    uint8_t  term_signal;   // Signal that killed this task (0 = normal exit)
 
     // Thread support
     uint32_t tgid;          // Thread group ID (= id for group leader)
@@ -67,8 +68,24 @@ typedef struct task_t {
     // Pending signals (bitmask)
     uint64_t pending_signals;
 
+    // Per-signal userspace handlers (set via rt_sigaction)
+    // 0 = SIG_DFL, 1 = SIG_IGN, else = handler function pointer
+    uint64_t sig_handlers[32];
+    uint64_t sig_restorer[32];  // sa_restorer per signal
+    uint32_t sig_flags[32];     // sa_flags per signal
+    uint64_t sig_mask;          // currently blocked signals (sigprocmask)
+
     // Wakeup time for sleeping tasks
     uint64_t wakeup_ticks;
+
+    // Current working directory
+    char cwd[256];
+
+    // Executable path (set by execve, used by /proc/self/exe)
+    char exec_path[512];
+
+    // For CLONE_CHILD_CLEARTID: write 0 here + futex_wake on thread exit
+    uint64_t clear_tid_addr;
 
     // Linked List for Run Queue
     struct task_t *next;
@@ -104,19 +121,37 @@ int task_create_thread(uint64_t entry, uint64_t arg, uint64_t user_stack);
 // Join a thread (block until it exits). Returns exit code or -1.
 int task_thread_join(uint32_t tid);
 
-// Wait for any child to exit. Returns child PID, stores exit code in *status.
-// Returns -1 if no children. Blocks if children exist but none have exited.
-int task_wait(int *status);
+// wait() option flags
+#define WNOHANG   1   // Don't block; return 0 if no child has exited
+#define WUNTRACED 2   // Also report stopped children (not implemented)
 
-// Wait for specific child. Returns child PID, stores exit code in *status.
-// Returns -1 if child not found or not a child of caller.
-int task_waitpid(uint32_t pid, int *status);
+// Linux wait status encoding helpers
+#define WSTATUS_EXIT(code)   (((code) & 0xff) << 8)        // normal exit
+#define WSTATUS_SIGNAL(sig)  ((sig) & 0x7f)                 // killed by signal
+
+// Wait for any child to exit. Returns child PID, status in *status (Linux encoding).
+// Returns 0 if WNOHANG and no child ready. Returns -1 if no children.
+int task_wait(int *status, int options);
+
+// Wait for specific child (pid>0) or any child (pid==-1).
+// Returns child PID, status in *status (Linux encoding).
+int task_waitpid(int pid, int *status, int options);
 
 // Exit with a specific exit code
 void task_exit_code(int code);
 
+// Kill all threads in the same thread group (SYS_EXIT_GROUP)
+void task_exit_group(int code);
+
 // Fork the current process (COW). Returns child PID to parent, 0 to child, -1 on error.
 int task_fork(registers_t *parent_regs);
+
+// In-place exec: replace current process image with new ELF.
+// argv and envp are NULL-terminated arrays of user-space string pointers (may be NULL).
+// Modifies regs so that on syscall return, execution starts in the new program.
+// Returns 0 on success (execution continues in new program via iretq), -1 on failure.
+int task_execve(registers_t *regs, const void *elf_data, size_t size,
+                const char *const *argv, const char *const *envp);
 
 int task_create_user(const char *name, const void *elf_data, size_t size, uint32_t parent_pid, abi_type_t abi);
 

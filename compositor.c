@@ -502,6 +502,15 @@ void compositor_render(void) {
     // Flip buffers
     if (comp.back_buffer != comp.front_buffer) {
         memcpy32(comp.front_buffer, comp.back_buffer, comp.width * comp.height);
+        
+        // If Virtio GPU is active, we need to manually flush the framebuffer to host
+        // These are weak symbols or checks inside the functions
+        extern void virtio_gpu_transfer(int x, int y, int w, int h);
+        extern void virtio_gpu_flush(int x, int y, int w, int h);
+        
+        // Update entire screen for now (optimized dirty rects later)
+        virtio_gpu_transfer(0, 0, comp.width, comp.height);
+        virtio_gpu_flush(0, 0, comp.width, comp.height);
     }
 }
 

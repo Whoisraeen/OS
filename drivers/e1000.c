@@ -200,11 +200,15 @@ void e1000_init(void) {
     e1000.tx_cur = 0;
     
     // Enable Interrupts
-    // e1000_write_reg(E1000_IMS, E1000_ICR_RXT0 | E1000_ICR_LSC);
-    
-    // Enable RX/TX
-    // e1000_write_reg(E1000_RCTL, E1000_RCTL_EN | E1000_RCTL_BAM | E1000_RCTL_MPE);
-    // e1000_write_reg(E1000_TCTL, E1000_TCTL_EN | E1000_TCTL_PSP);
+    e1000_write_reg(E1000_IMS, E1000_ICR_RXT0 | E1000_ICR_LSC);
+
+    // Enable RX
+    e1000_write_reg(E1000_RCTL, E1000_RCTL_EN | E1000_RCTL_BAM |
+                                E1000_RCTL_MPE | E1000_RCTL_SECRC);
+    // Enable TX (TCTL_CT=0x10, TCTL_COLD=0x40 are typical defaults)
+    e1000_write_reg(E1000_TCTL, E1000_TCTL_EN | E1000_TCTL_PSP |
+                                (0x10 << 4) | (0x40 << 12));
+    e1000_write_reg(E1000_TIPG, 0x00702008); // Standard inter-packet gap
 }
 
 int e1000_send_packet(const void *data, uint16_t len) {

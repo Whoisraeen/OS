@@ -258,48 +258,43 @@ pci_device_t *pci_get_device(int index) {
     return &devices[index];
 }
 
-int pci_enable_msi(pci_device_t *dev, uint8_t vector, uint8_t processor) {
+int pci_find_capability(pci_device_t *dev, uint8_t cap_id) {
     uint16_t status = pci_config_read16(dev->bus, dev->slot, dev->func, PCI_STATUS);
-    if (!(status & (1 << 4))) return -1; // No capabilities list
+    if (!(status & (1 << 4))) return 0; // No capabilities list
 
     uint8_t cap_ptr = pci_config_read8(dev->bus, dev->slot, dev->func, 0x34);
     
-    // Walk capabilities list
     while (cap_ptr != 0) {
-        uint8_t cap_id = pci_config_read8(dev->bus, dev->slot, dev->func, cap_ptr);
-        
-        if (cap_id == PCI_CAP_ID_MSI) {
-            // Found MSI capability
-            uint16_t msg_ctrl = pci_config_read16(dev->bus, dev->slot, dev->func, cap_ptr + 2);
-            
-            // 64-bit capable?
-            int is_64bit = (msg_ctrl & (1 << 7));
-            
-            // Configure Message Address
-            // Destination ID (processor) goes in bits 12-19
-            // RH=0, DM=0 (Physical Mode, Fixed Delivery)
-            uint32_t addr = 0xFEE00000 | ((uint32_t)processor << 12);
-            pci_config_write32(dev->bus, dev->slot, dev->func, cap_ptr + 4, addr);
-            
-            if (is_64bit) {
-                pci_config_write32(dev->bus, dev->slot, dev->func, cap_ptr + 8, 0); // High 32 bits = 0
-                pci_config_write16(dev->bus, dev->slot, dev->func, cap_ptr + 12, vector);
-            } else {
-                pci_config_write16(dev->bus, dev->slot, dev->func, cap_ptr + 8, vector);
-            }
-            
-            // Enable MSI in Message Control
-            // Bit 0 = MSI Enable
-            // Bits 4-6 = Multiple Message Enable (We set to 0 to request 1 vector)
-            msg_ctrl |= 1; 
-            pci_config_write16(dev->bus, dev->slot, dev->func, cap_ptr + 2, msg_ctrl);
-            
-            return 0; // Success
-        }
-        
-        // Next capability
+        uint8_t id = pci_config_read8(dev->bus, dev->slot, dev->func, cap_ptr);
+        if (id == cap_id) return cap_ptr;
         cap_ptr = pci_config_read8(dev->bus, dev->slot, dev->func, cap_ptr + 1);
     }
+    return 0;
+}
+
+int pci_enable_msi(pci_device_t *dev, uint8_t vector, uint8_t processor) {
+    uint8_t cap_ptr = pci_find_capability(dev, PCI_CAP_ID_MSI);
+    if (!cap_ptr) return -1;
     
-    return -1; // MSI not found
+    uint16_t msg_ctrl = pci_config_read16(dev->bus, dev->slot, dev->func, cap_ptr + 2);
+    
+    // 64-bit capable?
+    int is_64bit = (msg_ctrl & (1 << 7));
+    
+    // Configure Message Address
+    uint32_t addr = 0xFEE00000 | ((uint32_t)processor << 12);
+    pci_config_write32(dev->bus, dev->slot, dev->func, cap_ptr + 4, addr);
+    
+    if (is_64bit) {
+        pci_config_write32(dev->bus, dev->slot, dev->func, cap_ptr + 8, 0); // High 32 bits = 0
+        pci_config_write16(dev->bus, dev->slot, dev->func, cap_ptr + 12, vector);
+    } else {
+        pci_config_write16(dev->bus, dev->slot, dev->func, cap_ptr + 8, vector);
+    }
+    
+    // Enable MSI in Message Control
+    msg_ctrl |= 1; 
+    pci_config_write16(dev->bus, dev->slot, dev->func, cap_ptr + 2, msg_ctrl);
+    
+    return 0; // Success
 }

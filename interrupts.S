@@ -31,6 +31,7 @@ global syscall_entry
 ; Import C handlers
 extern isr_handler
 extern syscall_handler
+extern signal_try_deliver_frame
 
 ; GDT Flush (reloads segment registers)
 ; void global_gdt_flush(uint64_t gdt_ptr);
@@ -143,6 +144,13 @@ syscall_entry:
     ; Call C handler: syscall_handler(num, regs)
     mov rsi, rsp    ; 2nd arg: regs
     call syscall_handler
+
+    ; Deliver pending signals before returning to userspace.
+    ; r12 is callee-saved so signal_try_deliver_frame will preserve it.
+    mov r12, rax           ; save syscall return value
+    mov rdi, rsp           ; arg1: interrupt_frame * (RSP = start of frame)
+    call signal_try_deliver_frame
+    mov rax, r12           ; restore syscall return value
 
     ; RAX has return value. Keep it.
 

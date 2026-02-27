@@ -182,3 +182,11 @@ int pipe_create(struct fd_table *table, int *read_fd, int *write_fd) {
     *write_fd = wfd;
     return 0;
 }
+
+size_t pipe_bytes_available(pipe_t *pipe) {
+    if (!pipe) return 0;
+    spinlock_acquire(&pipe->lock);
+    size_t n = pipe->count;
+    spinlock_release(&pipe->lock);
+    return n;
+}

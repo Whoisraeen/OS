@@ -1,4 +1,5 @@
 #include "pmm.h"
+#include "spinlock.h"
 #include <stddef.h>
 
 // Request Memory Map from Limine (exported for use by VMM)
@@ -22,6 +23,7 @@ static uint64_t highest_page = 0;
 static uint64_t bitmap_size = 0;
 static uint64_t hhdm_offset = 0;        // Limine's HHDM offset
 static uint64_t first_free_hint = 1;    // Hint: first possibly-free page (skip page 0)
+static spinlock_t pmm_lock;             // Protects bitmap and refcounts
 
 // Reference counting array for COW support
 // refcount[page_index] = number of references to this physical page
@@ -49,6 +51,18 @@ static void bitmap_unset(uint64_t bit) {
 
 static int bitmap_test(uint64_t bit) {
     return bitmap[bit / 8] & (1 << (bit % 8));
+}
+
+uint64_t pmm_get_total_pages(void) {
+    return highest_page;
+}
+
+uint64_t pmm_get_free_pages(void) {
+    uint64_t free = 0;
+    for (uint64_t i = 0; i < highest_page; i++) {
+        if (!bitmap_test(i)) free++;
+    }
+    return free;
 }
 
 // Debugging globals
@@ -163,15 +177,20 @@ void pmm_init(void) {
 
     // 6. Mark Page 0 as used (null pointer protection)
     bitmap_set(0);
+
+    // 7. Initialize the PMM spinlock
+    spinlock_init(&pmm_lock);
 }
 
 void *pmm_alloc_page(void) {
+    spinlock_acquire(&pmm_lock);
     // Start from hint instead of always scanning from 1
     for (uint64_t i = first_free_hint; i < highest_page; i++) {
         if (!bitmap_test(i)) {
             bitmap_set(i);
             refcounts[i] = 1;
-            first_free_hint = i + 1; // Next search starts after this page
+            first_free_hint = i + 1;
+            spinlock_release(&pmm_lock);
             return (void *)(i * PAGE_SIZE);
         }
     }
@@ -181,14 +200,17 @@ void *pmm_alloc_page(void) {
             bitmap_set(i);
             refcounts[i] = 1;
             first_free_hint = i + 1;
+            spinlock_release(&pmm_lock);
             return (void *)(i * PAGE_SIZE);
         }
     }
+    spinlock_release(&pmm_lock);
     return NULL; // Out of memory
 }
 
 void *pmm_alloc_pages(size_t count) {
     if (count == 0) return NULL;
+    spinlock_acquire(&pmm_lock);
 
     // Find contiguous range of free pages, starting from hint
     uint64_t start = first_free_hint;
@@ -204,6 +226,7 @@ void *pmm_alloc_pages(size_t count) {
                     if (refcounts) refcounts[start + j] = 1;
                 }
                 first_free_hint = start + count;
+                spinlock_release(&pmm_lock);
                 return (void *)(start * PAGE_SIZE);
             }
         } else {
@@ -223,12 +246,14 @@ void *pmm_alloc_pages(size_t count) {
                     if (refcounts) refcounts[start + j] = 1;
                 }
                 first_free_hint = start + count;
+                spinlock_release(&pmm_lock);
                 return (void *)(start * PAGE_SIZE);
             }
         } else {
             found = 0;
         }
     }
+    spinlock_release(&pmm_lock);
     return NULL; // Out of memory
 }
 
@@ -236,15 +261,20 @@ void pmm_free_page(void *ptr) {
     uint64_t addr = (uint64_t)ptr;
     uint64_t page = addr / PAGE_SIZE;
     if (page >= highest_page) return;
+    spinlock_acquire(&pmm_lock);
     // Use refcount-aware free: decrement and only free if refcount reaches 0
     if (refcounts && refcounts[page] > 0) {
         refcounts[page]--;
-        if (refcounts[page] > 0) return; // Still shared
+        if (refcounts[page] > 0) {
+            spinlock_release(&pmm_lock);
+            return; // Still shared
+        }
     }
     bitmap_unset(page);
     if (page < first_free_hint) {
         first_free_hint = page;
     }
+    spinlock_release(&pmm_lock);
 }
 
 void pmm_free_pages(void *ptr, size_t count) {
@@ -259,7 +289,9 @@ void pmm_free_pages(void *ptr, size_t count) {
 void pmm_page_ref(void *phys) {
     uint64_t page = (uint64_t)phys / PAGE_SIZE;
     if (page < highest_page && refcounts) {
+        spinlock_acquire(&pmm_lock);
         refcounts[page]++;
+        spinlock_release(&pmm_lock);
     }
 }
 

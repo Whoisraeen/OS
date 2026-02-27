@@ -27,9 +27,13 @@
 #include "driver.h"
 #include "pci.h"
 #include "devfs.h"
+#include "procfs.h"
+#include "pty.h"
 #include "ahci.h"
 #include "drivers/e1000.h"
+#include "net/net.h"
 #include "drivers/hda.h"
+#include "drivers/gpu/amdgpu.h"
 #include "block.h"
 #include "partition.h"
 #include "bcache.h"
@@ -269,18 +273,12 @@ void _start(void) {
     fb_width = framebuffer->width;
     fb_height = framebuffer->height;
 
-    // Initialize Serial (for debug output)
+    // Initialize Serial and kernel log (early debug output)
     serial_init();
-    klog_init(); // Initialize kernel log buffer (once)
-    kprintf("\n[KERNEL] GDT initialized.\n");
+    klog_init();
 
     // Initialize GDT
     gdt_init();
-
-    // Initialize Serial (for debug output)
-    serial_init();
-    klog_init(); // Initialize kernel log buffer (once)
-    kprintf("\n[KERNEL] GDT initialized.\n");
 
     // Initialize IDT
     idt_init();
@@ -290,13 +288,21 @@ void _start(void) {
 
     // Initialize Keyboard
     keyboard_init();
-    
-    // Disable SMAP/SMEP (Bits 20, 21 of CR4)
-    uint64_t cr4;
-    __asm__ volatile ("mov %%cr4, %0" : "=r"(cr4));
-    cr4 &= ~(1 << 20); // SMEP
-    cr4 &= ~(1 << 21); // SMAP
-    __asm__ volatile ("mov %0, %%cr4" : : "r"(cr4));
+
+    // Enable SMEP (bit 20) and SMAP (bit 21) if supported by the CPU
+    // copy_to_user/copy_from_user use stac/clac for safe user-memory access.
+    {
+        uint32_t eax_out = 0, ebx = 0, ecx_out = 0, edx_out = 0;
+        __asm__ volatile ("cpuid"
+            : "=a"(eax_out), "=b"(ebx), "=c"(ecx_out), "=d"(edx_out)
+            : "a"(7), "c"(0));
+        (void)eax_out; (void)ecx_out; (void)edx_out;
+        uint64_t cr4;
+        __asm__ volatile ("mov %%cr4, %0" : "=r"(cr4));
+        if (ebx & (1U << 7))  cr4 |= (1ULL << 20); // SMEP
+        if (ebx & (1U << 20)) cr4 |= (1ULL << 21); // SMAP
+        __asm__ volatile ("mov %0, %%cr4" : : "r"(cr4) : "memory");
+    }
 
     // Initialize PMM
     pmm_init();
@@ -373,6 +379,10 @@ void _start(void) {
     
     // Initialize PCI bus enumeration
     pci_init();
+
+    // Initialize Virtio GPU (Accelerator)
+    #include "drivers/virtio/gpu.h"
+    virtio_gpu_init();
     
     // Initialize Drivers (Dependency Scanning)
     driver_init_pci();
@@ -380,17 +390,18 @@ void _start(void) {
     // Initialize AHCI Storage
     // ahci_init();
 
-    // Initialize E1000 Network Driver
+    // Initialize E1000 Network Driver + IP stack
     e1000_init();
-    
-    // Initialize lwIP Network Interface (Adapter)
-    // ethernetif_init(NULL);
+    net_init();
 
     // Initialize BGA Graphics (if available)
     // bga_init();
 
     // Initialize Audio (HDA)
-    // hda_init();
+    hda_init();
+
+    // Initialize GPU (AMD RDNA2)
+    amdgpu_init();
 
     // Initialize block device layer and register AHCI
     block_init();
@@ -425,6 +436,12 @@ void _start(void) {
 
     // Initialize /dev filesystem
     devfs_init();
+
+    // Initialize PTY subsystem
+    pty_subsystem_init();
+
+    // Initialize /proc virtual filesystem
+    procfs_init();
 
     // Initialize IPC subsystem
     ipc_init();

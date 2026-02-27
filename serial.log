@@ -5,14 +5,14 @@
 [VMM] Mapping HHDM: 0 - 0x100000000 (4096 MB)
 [HEAP] Initializing Linked List Heap...
 [ACPI] RSDP found: revision=0, OEM='6s'
-[ACPI] Using RSDT at 0x7fe22cb
+[ACPI] Using RSDT at 0x7fe22dc
 [ACPI] RSDT has 5 entries
-[ACPI]   Table: FACP at 0x7fe20c3 (len=244)
+[ACPI]   Table: FACP at 0x7fe20d4 (len=244)
 [ACPI] FADT: PM1a_ctrl=0x604, SCI_INT=9
 [ACPI] FADT: century_reg=50, boot_flags=0x0
-[ACPI] DSDT at 0x7fe0040 (len=8323)
+[ACPI] DSDT at 0x7fe0040 (len=8340)
 [ACPI] S5 sleep type: 0x0 (direct)
-[ACPI]   Table: APIC at 0x7fe21b7 (len=120)
+[ACPI]   Table: APIC at 0x7fe21c8 (len=120)
 [ACPI] MADT: LAPIC addr=0xfee00000, flags=0x1
 [ACPI]   LAPIC: proc=0 apic=0 enabled
 [ACPI]   IOAPIC: id=0 addr=0xfec00000 gsi_base=0
@@ -22,9 +22,9 @@
 [ACPI]   ISO: bus=0 source=IRQ10 -> GSI10 flags=0xd
 [ACPI]   ISO: bus=0 source=IRQ11 -> GSI11 flags=0xd
 [ACPI]   NMI source
-[ACPI]   Table: HPET at 0x7fe222f (len=56)
-[ACPI]   Table: MCFG at 0x7fe2267 (len=60)
-[ACPI]   Table: WAET at 0x7fe22a3 (len=40)
+[ACPI]   Table: HPET at 0x7fe2240 (len=56)
+[ACPI]   Table: MCFG at 0x7fe2278 (len=60)
+[ACPI]   Table: WAET at 0x7fe22b4 (len=40)
 [SMP] Detected 1 CPUs
 [DEBUG] cpu_t offsets: scratch=16, tss.rsp0=92
 [SMP] CPU 0 is BSP
@@ -40,8 +40,8 @@
 [TIMER] PIT initialized at 100 Hz
 [SCHED] SMP Scheduler Initialized (Per-CPU Queues).
 [LAPIC] Calibrating timer...
-[LAPIC] Calibration: 379642 ticks per 10ms (37964 kHz bus)
-[LAPIC] Timer started: periodic at ~100Hz (init=379642)
+[LAPIC] Calibration: 882629 ticks per 10ms (88262 kHz bus)
+[LAPIC] Timer started: periodic at ~100Hz (init=882629)
 [RTC] Initialized (century_reg=50)
 [DRIVER] Driver subsystem initialized
 [KSYMS] Kernel symbol table initialized
@@ -50,11 +50,21 @@
 [PCI] 00:01.0  1234:1111  class=03:00  irq=0  VGA Controller
 [PCI] 00:02.0  8086:10d3  class=02:00  irq=11  Ethernet Controller
 [PCI] 00:03.0  8086:2922  class=01:06  irq=11  SATA Controller
+[PCI] 00:04.0  1af4:1050  class=03:80  irq=10  Display Controller
 [PCI] 00:1f.0  8086:2918  class=06:01  irq=0  ISA Bridge
 [PCI] 00:1f.2  8086:2922  class=01:06  irq=10  SATA Controller
 [PCI] 00:1f.3  8086:2930  class=0c:05  irq=10  Serial Bus Controller
-[PCI] Found 7 devices
-[DRIVER] Probing 7 PCI devices...
+[PCI] Found 8 devices
+[VIRTIO] Probing for GPU...
+[VIRTIO] Found GPU at 00:04.0
+[VIRTIO] Queue 0 setup. Size=64, Notify=x
+[VIRTIO] Queue 1 setup. Size=16, Notify=x
+[VIRTIO] GPU Driver Initialized.
+[VIRTIO] Display Info: 1024x768 enabled=1
+[VIRTIO] GPU Configured 1024x768!
+[DRIVER] Probing 8 PCI devices...
+[HDA] No controller found.
+[AMDGPU] No AMD GPU found.
 [BLOCK] Registered 'sda' (AHCI)
 [PARTITION] Failed to read LBA 0
 [BCACHE] Initialized (128 blocks, 64 KB)
@@ -67,333 +77,553 @@
 [SYSCALL] Initialized
 [SCHED] Created Task 1 (aio_worker) on CPU 0
 [AIO] Initialized async I/O subsystem
-[KERNEL] fb_ptr=0xffff8000fd000000, width=1024, height=768
+[KERNEL] fb_ptr=0xffff800000aef000, width=1024, height=768
 [KERNEL] Clearing screen...
 [KERNEL] Screen cleared.
 [SECURITY] Created context for PID 2 (parent=0, caps=0xffffffffffffffff)
 [SCHED] Enqueuing task 2 on CPU 0 (lock=0)
-[SYSCALL] PID 2 called #158 (arg1=1002, arg2=400af8, arg3=8) at RIP 400819
 [SCHED] Created User Task 2 (service_manager) Entry=0x400030
+[SYSCALL] PID 2 called #158 (arg1=1002, arg2=400af8, arg3=8) at RIP 400819
 [MOUSE] PS/2 mouse initialized
 [KERNEL] All initialization complete. Entering idle loop.
 [SYSCALL] PID 2 called #218 (arg1=400c30, arg2=400af8, arg3=8) at RIP 40076d
 [SYSCALL] Unknown #218 from PID 2 at RIP 40076d
 [SM] Service Manager (PID 2) Started.
 [SYSCALL] PID 2 called #512 (arg1=4008b5, arg2=400820, arg3=26) at RIP 4000a6
-[SYSCALL] SYS_PROC_EXEC: Loading /compositor.elf (49152 bytes)
+[SYSCALL] SYS_PROC_EXEC: Loading /compositor.elf (49984 bytes)
 [SECURITY] Created context for PID 3 (parent=2, caps=0xffffffffffffffff)
 [SCHED] Enqueuing task 3 on CPU 0 (lock=0)
-[SYSCALL] PID 3 called #158 (arg1=1002, arg2=4043f8, arg3=8) at RIP 40200a
+[SYSCALL] PID 3 called #158 (arg1=1002, arg2=4044b8, arg3=8) at RIP 40209a
 [SCHED] Created User Task 3 (/compositor.elf) Entry=0x400030
-[SYSCALL] PID 3 called #218 (arg1=404530, arg2=4043f8, arg3=8) at RIP 401f5e
-[SYSCALL] Unknown #218 from PID 3 at RIP 401f5e
+[SYSCALL] PID 3 called #218 (arg1=4045f0, arg2=4044b8, arg3=8) at RIP 401fee
+[SYSCALL] Unknown #218 from PID 3 at RIP 401fee
 [SYSCALL] PID 2 called #511 (arg1=3, arg2=240800000, arg3=26) at RIP 4000c5
 [SECURITY] PID 2 granted capability 0x240800000 to PID 3
-[SYSCALL] PID 3 called #505 (arg1=4042c0, arg2=1f9, arg3=3e8) at RIP 400f6f
+[SYSCALL] PID 3 called #505 (arg1=404380, arg2=18, arg3=3e8) at RIP 400f6f
 [SM] Started Compositor.
 [SYSCALL] PID 2 called #512 (arg1=4008df, arg2=4008c5, arg3=19) at RIP 4000e3
 [SYSCALL] SYS_PROC_EXEC: Loading /panel.elf (43576 bytes)
 [SECURITY] Created context for PID 4 (parent=2, caps=0xffffffffffffffff)
 [SCHED] Enqueuing task 4 on CPU 0 (lock=0)
 [SYSCALL] PID 3 called #507 (arg1=300000, arg2=0, arg3=3e8) at RIP 40101a
-[IPC] Shared memory 1 created: size=3145728 (768 pages), owner=3, phys=0xe3e000
+[IPC] Shared memory 1 created: size=3145728 (768 pages), owner=3, phys=0x1143000
 [SCHED] Created User Task 4 (/panel.elf) Entry=0x400030
 [SYSCALL] PID 3 called #508 (arg1=1, arg2=0, arg3=3e8) at RIP 401030
 [IPC] Shared memory 1 mapped to PID 3 at virt 0x11000000 (768 pages)
 [SYSCALL] PID 4 called #158 (arg1=1002, arg2=4024f8, arg3=8) at RIP 4019da
 [SYSCALL] PID 4 called #218 (arg1=402630, arg2=4024f8, arg3=8) at RIP 40192e
 [SYSCALL] Unknown #218 from PID 4 at RIP 40192e
+[SYSCALL] PID 2 called #511 (arg1=4, arg2=10020240000000, arg3=19) at RIP 4000fb
+[SECURITY] PID 2 granted capability 0x10020240000000 to PID 4
 [SYSCALL] PID 3 called #500 (arg1=2, arg2=0, arg3=3e8) at RIP 401043
 [IPC] Port 1 created for PID 3 (flags=0x2)
 [SYSCALL] PID 4 called #503 (arg1=401a2c, arg2=18, arg3=1f7) at RIP 400912
 [IPC] Port lookup 'compositor' -> not found
-[SYSCALL] PID 2 called #511 (arg1=4, arg2=10020240000000, arg3=19) at RIP 4000fb
-[SECURITY] PID 2 granted capability 0x10020240000000 to PID 4
 [SM] Started Panel.
-[SYSCALL] PID 3 called #504 (arg1=1, arg2=402020, arg3=0) at RIP 40105e
-[IPC] Port 1 registered as 'compositor'
 [SYSCALL] PID 2 called #512 (arg1=4008ff, arg2=4008ea, arg3=14) at RIP 40011b
 [SYSCALL] SYS_PROC_EXEC: Loading /keyboard_driver.elf (14416 bytes)
 [SECURITY] Created context for PID 5 (parent=2, caps=0xffffffffffffffff)
 [SCHED] Enqueuing task 5 on CPU 0 (lock=0)
-[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #504 (arg1=1, arg2=4020c0, arg3=0) at RIP 40105e
+[IPC] Port 1 registered as 'compositor'
 [SYSCALL] PID 5 called #158 (arg1=1002, arg2=400998, arg3=8) at RIP 400799
-[SYSCALL] PID 5 called #218 (arg1=400ad0, arg2=400998, arg3=8) at RIP 4006ed
-[SYSCALL] Unknown #218 from PID 5 at RIP 4006ed
 [SCHED] Created User Task 5 (/keyboard_driver.elf) Entry=0x400030
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
-[KBD] Keyboard Driver Started
 [SYSCALL] PID 2 called #511 (arg1=5, arg2=41000000, arg3=14) at RIP 40012f
 [SECURITY] PID 2 granted capability 0x41000000 to PID 5
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 5 called #218 (arg1=400ad0, arg2=400998, arg3=8) at RIP 4006ed
+[SYSCALL] Unknown #218 from PID 5 at RIP 4006ed
+[SM] Started Keyboard Driver.
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 4 called #503 (arg1=401a2c, arg2=18, arg3=1f7) at RIP 400912
 [IPC] Port lookup 'compositor' -> port 1
-[SYSCALL] PID 5 called #500 (arg1=0, arg2=4007a0, arg3=1e) at RIP 40009f
-[IPC] Port 2 created for PID 5 (flags=0x0)
-[SYSCALL] PID 4 called #503 (arg1=401a2c, arg2=18, arg3=1f7) at RIP 40054f
-[IPC] Port lookup 'compositor' -> port 1
-[SYSCALL] PID 4 called #507 (arg1=100000, arg2=0, arg3=a8) at RIP 400886
-[IPC] Shared memory 2 created: size=1048576 (256 pages), owner=4, phys=0x124c000
-[SM] Started Keyboard Driver.
-[SYSCALL] PID 4 called #508 (arg1=2, arg2=0, arg3=a8) at RIP 400895
-[IPC] Shared memory 2 mapped to PID 4 at virt 0x12000000 (256 pages)
 [SYSCALL] PID 2 called #512 (arg1=400914, arg2=400870, arg3=1e) at RIP 40014f
 [SYSCALL] SYS_PROC_EXEC: Loading /mouse_driver.elf (18432 bytes)
 [SECURITY] Created context for PID 6 (parent=2, caps=0xffffffffffffffff)
 [SCHED] Enqueuing task 6 on CPU 0 (lock=0)
-[SYSCALL] PID 4 called #507 (arg1=20000, arg2=1, arg3=8000) at RIP 400e58
-[IPC] Shared memory 3 created: size=131072 (32 pages), owner=4, phys=0x1459000
-[SYSCALL] PID 5 called #504 (arg1=2, arg2=40080b, arg3=1e) at RIP 4000cf
-[IPC] Port 2 registered as 'keyboard'
+[SYSCALL] PID 4 called #503 (arg1=401a2c, arg2=18, arg3=1f7) at RIP 40054f
+[IPC] Port lookup 'compositor' -> port 1
+[SYSCALL] PID 4 called #507 (arg1=100000, arg2=0, arg3=a8) at RIP 400886
+[IPC] Shared memory 2 created: size=1048576 (256 pages), owner=4, phys=0x165d000
+[SYSCALL] PID 6 called #158 (arg1=1002, arg2=400b78, arg3=8) at RIP 40094f
+[SYSCALL] PID 4 called #508 (arg1=2, arg2=0, arg3=a8) at RIP 400895
+[IPC] Shared memory 2 mapped to PID 4 at virt 0x12000000 (256 pages)
+[SYSCALL] PID 6 called #218 (arg1=400cb0, arg2=400b78, arg3=8) at RIP 4008a3
+[SYSCALL] Unknown #218 from PID 6 at RIP 4008a3
 [SCHED] Created User Task 6 (/mouse_driver.elf) Entry=0x400030
-[SYSCALL] PID 2 called #511 (arg1=6, arg2=41000000, arg3=1e) at RIP 400163
-[SECURITY] PID 2 granted capability 0x41000000 to PID 6
+[SYSCALL] PID 3 called #520 (arg1=64, arg2=64, arg3=190) at RIP 40190b
+[SYSCALL] PID 4 called #507 (arg1=20000, arg2=1, arg3=8000) at RIP 400e58
+[IPC] Shared memory 3 created: size=131072 (32 pages), owner=4, phys=0x1760000
+[MOUSE] Driver Started
+[SYSCALL] PID 6 called #500 (arg1=0, arg2=400958, arg3=17) at RIP 4000d3
+[IPC] Port 2 created for PID 6 (flags=0x0)
 [SYSCALL] PID 4 called #508 (arg1=3, arg2=0, arg3=8000) at RIP 400e72
 [IPC] Shared memory 3 mapped to PID 4 at virt 0x13000000 (32 pages)
-[SYSCALL] PID 5 called #518 (arg1=1, arg2=40080b, arg3=1e) at RIP 40011c
+[SYSCALL] PID 6 called #504 (arg1=2, arg2=400970, arg3=17) at RIP 400103
+[IPC] Port 2 registered as 'mouse'
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[KBD] Keyboard Driver Started
+[SYSCALL] PID 6 called #517 (arg1=64, arg2=0, arg3=0) at RIP 400096
+[SYSCALL] PID 2 called #511 (arg1=6, arg2=41000000, arg3=1e) at RIP 400163
+[SECURITY] PID 2 granted capability 0x41000000 to PID 6
 [SM] Started Mouse Driver.
 [SYSCALL] PID 4 called #500 (arg1=0, arg2=0, arg3=ffffffff) at RIP 400eac
 [IPC] Port 3 created for PID 4 (flags=0x0)
-[SYSCALL] PID 6 called #158 (arg1=1002, arg2=400b78, arg3=8) at RIP 40094f
+[SYSCALL] PID 5 called #500 (arg1=0, arg2=4007a0, arg3=1e) at RIP 40009f
+[IPC] Port 4 created for PID 5 (flags=0x0)
+[SYSCALL] PID 5 called #504 (arg1=4, arg2=40080b, arg3=1e) at RIP 4000cf
+[IPC] Port 4 registered as 'keyboard'
 [SYSCALL] PID 2 called #512 (arg1=400942, arg2=400926, arg3=1b) at RIP 400183
 [SYSCALL] SYS_PROC_EXEC: Loading /terminal.elf (7669192 bytes)
 [SECURITY] Created context for PID 7 (parent=2, caps=0xffffffffffffffff)
 [SCHED] Enqueuing task 7 on CPU 0 (lock=0)
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
 [SYSCALL] PID 4 called #501 (arg1=1, arg2=7fffffffee70, arg3=0) at RIP 400f40
 [IPC] Message sent: PID 4 -> port 1 (msg_id=1, size=56)
-[SYSCALL] PID 6 called #218 (arg1=400cb0, arg2=400b78, arg3=8) at RIP 4008a3
-[SYSCALL] Unknown #218 from PID 6 at RIP 4008a3
-[SCHED] Created User Task 7 (/terminal.elf) Entry=0x400030
-[MOUSE] Driver Started
-[SYSCALL] PID 6 called #500 (arg1=0, arg2=400958, arg3=17) at RIP 4000d3
-[IPC] Port 4 created for PID 6 (flags=0x0)
-[SYSCALL] PID 6 called #504 (arg1=4, arg2=400970, arg3=17) at RIP 400103
-[IPC] Port 4 registered as 'mouse'
+[SYSCALL] PID 5 called #518 (arg1=1, arg2=40080b, arg3=1e) at RIP 40011c
 [SYSCALL] PID 7 called #158 (arg1=1002, arg2=5b4518, arg3=8) at RIP 525bd7
+[SCHED] Created User Task 7 (/terminal.elf) Entry=0x400030
 [SYSCALL] PID 2 called #511 (arg1=7, arg2=240000000, arg3=1b) at RIP 40019b
 [SECURITY] PID 2 granted capability 0x240000000 to PID 7
-[SYSCALL] PID 4 called #501 (arg1=1, arg2=7fffffffee70, arg3=0) at RIP 4010fd
-[IPC] Message sent: PID 4 -> port 1 (msg_id=2, size=0)
-[SYSCALL] PID 6 called #517 (arg1=64, arg2=0, arg3=0) at RIP 400096
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 6 called #517 (arg1=64, arg2=a8, arg3=1) at RIP 400148
 [SYSCALL] PID 7 called #218 (arg1=5b4650, arg2=5b4518, arg3=8) at RIP 5202d3
 [SYSCALL] Unknown #218 from PID 7 at RIP 5202d3
 [SM] Started Terminal.
-[SYSCALL] PID 4 called #502 (arg1=3, arg2=7fffffffee80, arg3=98) at RIP 401223
 [SYSCALL] PID 2 called #61 (arg1=ffffffffffffffff, arg2=7fffffffef54, arg3=0) at RIP 4001e8
-[SYSCALL] PID 6 called #517 (arg1=64, arg2=a8, arg3=1) at RIP 400148
-[SYSCALL] PID 6 called #517 (arg1=64, arg2=0, arg3=0) at RIP 400096
-[SYSCALL] PID 6 called #517 (arg1=64, arg2=d4, arg3=1) at RIP 40015d
-[SYSCALL] PID 6 called #517 (arg1=64, arg2=0, arg3=0) at RIP 400096
-[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[IPC] Message received: port 1 -> PID 3 (msg_id=1, size=56)
-[SYSCALL] PID 6 called #517 (arg1=60, arg2=f4, arg3=1) at RIP 400174
-[SYSCALL] PID 3 called #508 (arg1=3, arg2=64, arg3=1) at RIP 40060a
-[IPC] Shared memory 3 mapped to PID 3 at virt 0x13000000 (32 pages)
-[SYSCALL] PID 6 called #517 (arg1=64, arg2=0, arg3=0) at RIP 40019e
+[SYSCALL] PID 4 called #501 (arg1=1, arg2=7fffffffee70, arg3=0) at RIP 4010fd
+[IPC] Message sent: PID 4 -> port 1 (msg_id=2, size=0)
+[SYSCALL] PID 4 called #502 (arg1=3, arg2=7fffffffee80, arg3=98) at RIP 401223
 
 [EXCEPTION] Invalid Opcode (0x6) at 0x51e70f — task 7 killed
 [SCHED] Task 7 (/terminal.elf) exiting with code 0 on CPU 0
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=64, arg3=464) at RIP 40116c
-[SYSCALL] PID 6 called #517 (arg1=60, arg2=0, arg3=0) at RIP 4001b3
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[IPC] Message received: port 1 -> PID 3 (msg_id=1, size=56)
+[SYSCALL] PID 6 called #517 (arg1=64, arg2=0, arg3=0) at RIP 400096
 [SYSCALL] PID 2 called #61 (arg1=ffffffffffffffff, arg2=7fffffffef54, arg3=0) at RIP 4001e8
+[SYSCALL] PID 3 called #508 (arg1=3, arg2=64, arg3=1) at RIP 40060a
+[IPC] Shared memory 3 mapped to PID 3 at virt 0x13000000 (32 pages)
+[SYSCALL] PID 6 called #517 (arg1=64, arg2=d4, arg3=1) at RIP 40015d
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=64, arg3=464) at RIP 40116f
+[SYSCALL] PID 6 called #517 (arg1=64, arg2=0, arg3=0) at RIP 400096
+[SYSCALL] PID 6 called #517 (arg1=60, arg2=f4, arg3=1) at RIP 400174
+[SYSCALL] PID 6 called #517 (arg1=64, arg2=0, arg3=0) at RIP 40019e
+[SYSCALL] PID 6 called #517 (arg1=60, arg2=0, arg3=0) at RIP 4001b3
 [SYSCALL] PID 6 called #518 (arg1=c, arg2=0, arg3=0) at RIP 4001e0
+[SYSCALL] PID 3 called #520 (arg1=64, arg2=64, arg3=39c) at RIP 40190b
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
 [IPC] Message received: port 1 -> PID 3 (msg_id=2, size=0)
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #520 (arg1=0, arg2=0, arg3=400) at RIP 40190b
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #520 (arg1=0, arg2=0, arg3=400) at RIP 40190b
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
 [SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
-[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116c
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #520 (arg1=0, arg2=0, arg3=400) at RIP 40190b
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 6 called #503 (arg1=400976, arg2=0, arg3=0) at RIP 4001ef
+[IPC] Port lookup 'compositor' -> port 1
+[SYSCALL] PID 6 called #517 (arg1=64, arg2=0, arg3=0) at RIP 400202
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 6 called #517 (arg1=60, arg2=0, arg3=0) at RIP 400223
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 6 called #517 (arg1=64, arg2=0, arg3=0) at RIP 400246
+[SYSCALL] PID 6 called #517 (arg1=60, arg2=0, arg3=0) at RIP 400223
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 6 called #517 (arg1=64, arg2=0, arg3=0) at RIP 400246
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 6 called #517 (arg1=60, arg2=0, arg3=0) at RIP 400223
+[SYSCALL] PID 6 called #501 (arg1=1, arg2=7fffffffef40, arg3=10) at RIP 400336
+[IPC] Message sent: PID 6 -> port 1 (msg_id=3, size=100)
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[IPC] Message received: port 1 -> PID 3 (msg_id=3, size=100)
+[SYSCALL] PID 6 called #517 (arg1=64, arg2=0, arg3=0) at RIP 400246
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 6 called #517 (arg1=60, arg2=0, arg3=0) at RIP 400223
+[SYSCALL] PID 6 called #517 (arg1=64, arg2=0, arg3=0) at RIP 400246
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 6 called #517 (arg1=60, arg2=0, arg3=0) at RIP 400223
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 6 called #517 (arg1=64, arg2=0, arg3=0) at RIP 400246
+[SYSCALL] PID 6 called #517 (arg1=60, arg2=0, arg3=0) at RIP 400223
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 6 called #501 (arg1=1, arg2=7fffffffef40, arg3=10) at RIP 400336
+[IPC] Message sent: PID 6 -> port 1 (msg_id=4, size=100)
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 6 called #517 (arg1=64, arg2=0, arg3=0) at RIP 400246
+[SYSCALL] PID 6 called #518 (arg1=c, arg2=0, arg3=0) at RIP 4001e0
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[IPC] Message received: port 1 -> PID 3 (msg_id=4, size=100)
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #520 (arg1=0, arg2=0, arg3=400) at RIP 40190b
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f
+[SYSCALL] PID 3 called #502 (arg1=1, arg2=7fffffffeeb0, arg3=1) at RIP 4010a1
+[SYSCALL] PID 3 called #228 (arg1=7fffffffeea0, arg2=7fffffffeeb0, arg3=1) at RIP 40116f

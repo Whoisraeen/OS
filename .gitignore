@@ -1,0 +1,10 @@
+# Build logs
+*.log
+build*.txt
+
+# Build artifacts
+*.o
+*.iso
+*.img
+kernel.elf
+initrd.tar

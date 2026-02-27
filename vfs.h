@@ -14,6 +14,10 @@ typedef struct vfs_node *(*readdir_fn)(struct vfs_node *node, size_t index);
 typedef struct vfs_node *(*finddir_fn)(struct vfs_node *node, const char *name);
 typedef struct vfs_node *(*create_fn)(struct vfs_node *parent, const char *name, int flags);
 typedef int (*mkdir_fn)(struct vfs_node *parent, const char *name);
+typedef int (*unlink_fn)(struct vfs_node *parent, const char *name);
+typedef int (*rmdir_fn)(struct vfs_node *parent, const char *name);
+typedef int (*rename_fn)(struct vfs_node *old_parent, const char *old_name,
+                         struct vfs_node *new_parent, const char *new_name);
 
 // File types
 #define VFS_FILE      0x01
@@ -33,8 +37,11 @@ typedef struct vfs_node {
     readdir_fn readdir;
     finddir_fn finddir;
     create_fn create;
-    mkdir_fn mkdir;
-    
+    mkdir_fn  mkdir;
+    unlink_fn unlink;
+    rmdir_fn  rmdir;
+    rename_fn rename;
+
     // Pointer to implementation-specific data
     void *impl;
     
@@ -53,7 +60,14 @@ int vfs_mkdir_node(vfs_node_t *parent, const char *name);
 // Path resolution and mounting
 vfs_node_t *vfs_open(const char *path, int flags);
 int vfs_mount(const char *path, vfs_node_t *fs_root);
-int vfs_mkdir(const char *path); // Helper to create mount points in VFS
+int vfs_mkdir(const char *path);           // Create directory at absolute path
+int vfs_unlink(const char *path);          // Remove file
+int vfs_rmdir(const char *path);           // Remove empty directory
+int vfs_rename(const char *old_path, const char *new_path); // Rename/move
+
+// Resolve a possibly-relative path against cwd into an absolute path in out.
+// Handles ".", "..", multiple slashes. out must be at least out_len bytes.
+void vfs_resolve_path(const char *cwd, const char *path, char *out, size_t out_len);
 
 // Root filesystem
 extern vfs_node_t *vfs_root;
