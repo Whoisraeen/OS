@@ -28,7 +28,7 @@ SRCS = kernel.c gdt.c idt.c pic.c keyboard.c pmm.c vmm.c heap.c serial.c \
        mouse.c desktop.c speaker.c compositor.c elf.c ipc.c security.c \
        spinlock.c cpu.c lapic.c mutex.c semaphore.c fd.c pipe.c pty.c signal.c \
        futex.c vm_area.c acpi.c ioapic.c rtc.c driver.c pci.c dma.c \
-       devfs.c procfs.c ahci.c bga.c block.c partition.c bcache.c ext2.c klog.c ksyms.c \
+       devfs.c procfs.c ahci.c bga.c block.c partition.c bcache.c ext2.c journal.c klog.c ksyms.c \
        aio.c drivers/e1000.c drivers/hda.c drivers/usb/xhci.c \
        drivers/usb/hid_gamepad.c drivers/nvme.c \
        drivers/gpu/amdgpu.c \

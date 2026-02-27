@@ -83,7 +83,7 @@ typedef struct {
     bool     t_active;                           // Transaction in progress?
 } jnl_transaction_t;
 
-typedef struct {
+typedef struct journal_t_tag {
     block_device_t *dev;        // Underlying block device
     uint32_t        start_lba;  // First LBA of journal region (in sectors)
     uint32_t        block_size; // FS block size (bytes)

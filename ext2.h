@@ -6,6 +6,10 @@
 #include "block.h"
 #include "vfs.h"
 
+// Forward declare journal type
+struct journal_t_tag;
+typedef struct journal_t_tag journal_t;
+
 // ext2 magic number
 #define EXT2_MAGIC 0xEF53
 
@@ -159,6 +163,7 @@ typedef struct {
     uint32_t inode_size;            // Bytes per inode on disk
     uint32_t ptrs_per_block;        // block_size / 4 (pointers in indirect block)
     vfs_node_t *root_node;          // VFS root node for this mount
+    journal_t  *jnl;                // Metadata journal (NULL if not journaled)
 } ext2_fs_t;
 
 // Stat structure for SYS_STAT
